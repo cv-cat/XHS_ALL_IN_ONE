@@ -556,6 +556,7 @@ def test_xhs_pc_qrcode_login_session_persists_and_confirms_account(tmp_path):
         polled = poll_response.json()
         assert polled["status"] == "confirmed"
         assert polled["account"]["nickname"] == "cat"
+        assert polled["creator_account"] is None
 
         accounts_response = client.get(
             "/api/accounts?platform=xhs",
@@ -736,7 +737,7 @@ def test_xhs_pc_qrcode_reports_adapter_failure_as_bad_gateway(tmp_path):
         app.dependency_overrides.pop(get_creator_login_adapter, None)
 
 
-def test_xhs_pc_qrcode_login_auto_syncs_creator_account(tmp_path):
+def test_xhs_pc_qrcode_login_can_optionally_sync_creator_account(tmp_path):
     from backend.app.api.login_sessions import get_creator_login_adapter, get_pc_login_adapter
     from backend.app.core.database import get_db
     from backend.app.core.security import decrypt_text
@@ -751,6 +752,7 @@ def test_xhs_pc_qrcode_login_auto_syncs_creator_account(tmp_path):
         created = client.post(
             "/api/xhs/login-sessions/pc/qrcode",
             headers={"Authorization": f"Bearer {access_token}"},
+            json={"sync_creator": True},
         ).json()
         poll_response = client.get(
             f"/api/xhs/login-sessions/{created['session_id']}",
@@ -834,12 +836,72 @@ def test_xhs_pc_phone_login_session_sends_code_and_confirms_account(tmp_path):
         confirmed = confirm_response.json()
         assert confirmed["status"] == "confirmed"
         assert confirmed["account"]["nickname"] == "phone-cat"
+        assert confirmed["creator_account"] is None
 
         db = next(app.dependency_overrides[get_db]())
         try:
             account = db.query(PlatformAccount).one()
             assert account.sub_type == "pc"
             assert account.external_user_id == "phone-user-1"
+        finally:
+            db.close()
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+        app.dependency_overrides.pop(get_pc_login_adapter, None)
+        app.dependency_overrides.pop(get_creator_login_adapter, None)
+
+
+def test_xhs_pc_phone_login_can_optionally_sync_creator_account(tmp_path):
+    from backend.app.api.login_sessions import get_creator_login_adapter, get_pc_login_adapter
+    from backend.app.core.database import get_db
+    from backend.app.core.security import decrypt_text
+    from backend.app.models import AccountCookieVersion, LoginSession, PlatformAccount
+
+    db_dependency = _override_database(tmp_path)
+    app.dependency_overrides[get_pc_login_adapter] = lambda: FakePhoneLoginAdapter()
+    app.dependency_overrides[get_creator_login_adapter] = lambda: FakeCreatorLoginAdapter()
+    try:
+        access_token = _register_and_get_access_token("phone-auto-creator-operator")
+
+        send_response = client.post(
+            "/api/xhs/login-sessions/pc/phone/send-code",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"phone": "13800138000", "sync_creator": True},
+        )
+        assert send_response.status_code == 200
+        sent = send_response.json()
+
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            stored_session = db.get(LoginSession, sent["session_id"])
+            assert decrypt_text(stored_session.encrypted_temp_cookies) == '{"cookies":{"a1":"phone-temp-a1"},"sync_creator":true}'
+        finally:
+            db.close()
+
+        confirm_response = client.post(
+            "/api/xhs/login-sessions/pc/phone/confirm",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"session_id": sent["session_id"], "phone": "13800138000", "code": "123456"},
+        )
+        assert confirm_response.status_code == 200
+        confirmed = confirm_response.json()
+        assert confirmed["status"] == "confirmed"
+        assert confirmed["account"]["sub_type"] == "pc"
+        assert confirmed["creator_account"]["sub_type"] == "creator"
+        assert confirmed["creator_account"]["nickname"] == "creator-cat"
+
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            accounts = db.query(PlatformAccount).order_by(PlatformAccount.sub_type.asc()).all()
+            assert len(accounts) == 2
+            creator_account = next(account for account in accounts if account.sub_type == "creator")
+            creator_cookie = (
+                db.query(AccountCookieVersion)
+                .filter(AccountCookieVersion.platform_account_id == creator_account.id)
+                .order_by(AccountCookieVersion.id.desc())
+                .one()
+            )
+            assert decrypt_text(creator_cookie.encrypted_cookies) == '{"a1":"phone-final-a1","customer_session":"session-456"}'
         finally:
             db.close()
     finally:
@@ -1034,6 +1096,13 @@ def test_account_cookie_import_creates_account_and_health_check_updates_status(t
         finally:
             db.close()
 
+        accounts_response = client.get(
+            "/api/accounts?platform=xhs",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        assert accounts_response.status_code == 200
+        assert accounts_response.json()["total"] == 1
+
         check_response = client.post(
             f"/api/accounts/{imported['id']}/check",
             headers={"Authorization": f"Bearer {access_token}"},
@@ -1049,7 +1118,7 @@ def test_account_cookie_import_creates_account_and_health_check_updates_status(t
         app.dependency_overrides.pop(get_creator_account_adapter, None)
 
 
-def test_account_cookie_import_for_pc_auto_syncs_creator_account(tmp_path):
+def test_account_cookie_import_for_pc_can_optionally_sync_creator_account(tmp_path):
     from backend.app.api.accounts import get_creator_account_adapter, get_pc_account_adapter
     from backend.app.core.database import get_db
     from backend.app.core.security import decrypt_text
@@ -1065,7 +1134,12 @@ def test_account_cookie_import_for_pc_auto_syncs_creator_account(tmp_path):
         import_response = client.post(
             "/api/accounts/import-cookie",
             headers={"Authorization": f"Bearer {access_token}"},
-            json={"platform": "xhs", "sub_type": "pc", "cookie_string": "a1=cookie-a1; web_session=session"},
+            json={
+                "platform": "xhs",
+                "sub_type": "pc",
+                "cookie_string": "a1=cookie-a1; web_session=session",
+                "sync_creator": True,
+            },
         )
         assert import_response.status_code == 200
 

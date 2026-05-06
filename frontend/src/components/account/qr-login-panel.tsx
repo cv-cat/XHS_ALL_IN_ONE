@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Space, Typography } from "antd";
+import { Alert, Button, Card, Checkbox, Space, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { useEffect, useRef, useState } from "react";
@@ -18,6 +18,7 @@ export function QrLoginPanel({ accountType, onConfirmed }: QrLoginPanelProps) {
   const [statusText, setStatusText] = useState("准备生成二维码");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [syncCreator, setSyncCreator] = useState(false);
   const confirmedRef = useRef(false);
 
   function errorMessage(error: unknown): string {
@@ -35,7 +36,10 @@ export function QrLoginPanel({ accountType, onConfirmed }: QrLoginPanelProps) {
     setError(null);
     confirmedRef.current = false;
     try {
-      const nextSession = accountType === "pc" ? await createXhsPcQrLoginSession() : await createXhsCreatorQrLoginSession();
+      const nextSession =
+        accountType === "pc"
+          ? await createXhsPcQrLoginSession({ sync_creator: syncCreator })
+          : await createXhsCreatorQrLoginSession();
       setSession(nextSession);
       setStatusText(accountType === "pc" ? "请使用小红书 App 扫描二维码" : "请使用小红书 App 扫描 Creator 二维码");
     } catch (caught) {
@@ -47,7 +51,7 @@ export function QrLoginPanel({ accountType, onConfirmed }: QrLoginPanelProps) {
 
   useEffect(() => {
     void startSession();
-  }, [accountType]);
+  }, [accountType, syncCreator]);
 
   useEffect(() => {
     if (!session?.session_id || session.status === "confirmed" || session.status === "expired") {
@@ -129,6 +133,16 @@ export function QrLoginPanel({ accountType, onConfirmed }: QrLoginPanelProps) {
           </AntLink>
         ) : null}
       </div>
+
+      {accountType === "pc" ? (
+        <Checkbox
+          checked={syncCreator}
+          onChange={(event) => setSyncCreator(event.target.checked)}
+          style={{ color: "rgba(255,255,255,0.88)" }}
+        >
+          登录 PC 后同步 Creator 账号
+        </Checkbox>
+      ) : null}
 
       {error ? <Alert type="error" message={error} showIcon /> : null}
 

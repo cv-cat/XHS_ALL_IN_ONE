@@ -34,6 +34,7 @@ class CookieImportRequest(BaseModel):
     platform: str = Field(pattern="^xhs$")
     sub_type: str = Field(pattern="^(pc|creator)$")
     cookie_string: str = Field(min_length=3)
+    sync_creator: bool = False
 
 
 def get_pc_account_adapter() -> XhsPcLoginAdapter:
@@ -131,7 +132,7 @@ def import_cookie(
         user_info=user_info,
         cookies_text=payload.cookie_string,
     )
-    if payload.sub_type == "pc":
+    if payload.sub_type == "pc" and payload.sync_creator:
         _sync_creator_account_from_pc_cookie(
             db=db,
             user_id=current_user.id,

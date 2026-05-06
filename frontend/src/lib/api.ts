@@ -769,6 +769,7 @@ export async function uploadPublishAsset(assetId: number): Promise<PublishAsset>
 export async function importXhsCookieAccount(payload: {
   sub_type: "pc" | "creator";
   cookie_string: string;
+  sync_creator?: boolean;
 }): Promise<PlatformAccount> {
   const response = await http.post<PlatformAccount>("/accounts/import-cookie", {
     platform: "xhs",
@@ -787,8 +788,10 @@ export async function deleteAccount(accountId: number): Promise<{ id: number; st
   return response.data;
 }
 
-export async function createXhsPcQrLoginSession(): Promise<XhsQrLoginSession> {
-  const response = await http.post<XhsQrLoginSession>("/xhs/login-sessions/pc/qrcode");
+export async function createXhsPcQrLoginSession(payload?: {
+  sync_creator?: boolean;
+}): Promise<XhsQrLoginSession> {
+  const response = await http.post<XhsQrLoginSession>("/xhs/login-sessions/pc/qrcode", payload ?? {});
   return response.data;
 }
 
@@ -805,10 +808,11 @@ export async function pollXhsLoginSession(sessionId: number): Promise<XhsQrLogin
 export async function sendXhsPhoneCode(payload: {
   sub_type: "pc" | "creator";
   phone: string;
+  sync_creator?: boolean;
 }): Promise<{ session_id: number; status: string; message: string }> {
   const response = await http.post<{ session_id: number; status: string; message: string }>(
     `/xhs/login-sessions/${payload.sub_type}/phone/send-code`,
-    { phone: payload.phone }
+    { phone: payload.phone, sync_creator: payload.sync_creator }
   );
   return response.data;
 }
@@ -818,11 +822,13 @@ export async function confirmXhsPhoneLogin(payload: {
   session_id: number;
   phone: string;
   code: string;
+  sync_creator?: boolean;
 }): Promise<XhsQrLoginSession> {
   const response = await http.post<XhsQrLoginSession>(`/xhs/login-sessions/${payload.sub_type}/phone/confirm`, {
     session_id: payload.session_id,
     phone: payload.phone,
-    code: payload.code
+    code: payload.code,
+    sync_creator: payload.sync_creator
   });
   return response.data;
 }

@@ -1,4 +1,4 @@
-import { Alert, Button, Form, Input, Space } from "antd";
+import { Alert, Button, Checkbox, Form, Input, Space } from "antd";
 import { ImportOutlined } from "@ant-design/icons";
 import { useState } from "react";
 
@@ -14,6 +14,7 @@ export function CookieImportPanel({ accountType, onImported }: CookieImportPanel
   const [cookieString, setCookieString] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [syncCreator, setSyncCreator] = useState(false);
 
   async function handleImport() {
     setError(null);
@@ -24,7 +25,11 @@ export function CookieImportPanel({ accountType, onImported }: CookieImportPanel
 
     setIsSubmitting(true);
     try {
-      const account = await importXhsCookieAccount({ sub_type: accountType, cookie_string: cookieString.trim() });
+      const account = await importXhsCookieAccount({
+        sub_type: accountType,
+        cookie_string: cookieString.trim(),
+        sync_creator: accountType === "pc" ? syncCreator : undefined
+      });
       onImported(account);
       setCookieString("");
     } catch {
@@ -47,6 +52,16 @@ export function CookieImportPanel({ accountType, onImported }: CookieImportPanel
           />
         </Form.Item>
       </Form>
+
+      {accountType === "pc" ? (
+        <Checkbox
+          checked={syncCreator}
+          onChange={(event) => setSyncCreator(event.target.checked)}
+          style={{ color: "rgba(255,255,255,0.88)" }}
+        >
+          导入 PC Cookie 后同步 Creator 账号
+        </Checkbox>
+      ) : null}
 
       {error ? <Alert type="error" message={error} showIcon /> : null}
 

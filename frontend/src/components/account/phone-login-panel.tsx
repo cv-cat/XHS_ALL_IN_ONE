@@ -1,4 +1,4 @@
-import { Alert, Button, Form, Input, Space, Typography } from "antd";
+import { Alert, Button, Checkbox, Form, Input, Space, Typography } from "antd";
 import { MessageOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { useEffect, useState } from "react";
 
@@ -23,6 +23,7 @@ export function PhoneLoginPanel({ accountType, onConfirmed }: PhoneLoginPanelPro
   const [isConfirming, setIsConfirming] = useState(false);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [syncCreator, setSyncCreator] = useState(false);
   const isCoolingDown = cooldownSeconds > 0;
 
   useEffect(() => {
@@ -49,7 +50,11 @@ export function PhoneLoginPanel({ accountType, onConfirmed }: PhoneLoginPanelPro
 
     setIsSending(true);
     try {
-      const result = await sendXhsPhoneCode({ sub_type: accountType, phone: phone.trim() });
+      const result = await sendXhsPhoneCode({
+        sub_type: accountType,
+        phone: phone.trim(),
+        sync_creator: accountType === "pc" ? syncCreator : undefined
+      });
       setSessionId(result.session_id);
       setStatusText("验证码已发送，请查看手机短信");
       setCooldownSeconds(PHONE_CODE_COOLDOWN_SECONDS);
@@ -77,7 +82,8 @@ export function PhoneLoginPanel({ accountType, onConfirmed }: PhoneLoginPanelPro
         sub_type: accountType,
         session_id: sessionId,
         phone: phone.trim(),
-        code: code.trim()
+        code: code.trim(),
+        sync_creator: accountType === "pc" ? syncCreator : undefined
       });
       if (result.account) {
         onConfirmed(result.account);
@@ -104,6 +110,16 @@ export function PhoneLoginPanel({ accountType, onConfirmed }: PhoneLoginPanelPro
           />
         </Form.Item>
       </Form>
+
+      {accountType === "pc" ? (
+        <Checkbox
+          checked={syncCreator}
+          onChange={(event) => setSyncCreator(event.target.checked)}
+          style={{ color: "rgba(255,255,255,0.88)" }}
+        >
+          登录 PC 后同步 Creator 账号
+        </Checkbox>
+      ) : null}
 
       <Button
         block

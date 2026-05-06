@@ -66,6 +66,7 @@ export type XhsQrLoginSession = {
   qr_url: string;
   qr_image_data_url?: string;
   account?: PlatformAccount | null;
+  creator_account?: PlatformAccount | null;
 };
 
 export type XhsSearchNote = {
