@@ -1,0 +1,1 @@
+"""XHS SDK adapter boundary."""

@@ -1,0 +1,53 @@
+# Version control
+.git
+.gitignore
+
+# Node modules (rebuilt during build)
+node_modules
+frontend/node_modules
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.pytest_cache
+
+# Environment and secrets
+.env
+*.env.local
+*.env.*.local
+
+# Database files
+*.db
+data/
+
+# Storage artifacts (mounted as volumes)
+backend/app/storage/media/*
+backend/app/storage/exports/*
+
+# IDE and editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# CI/CD and tooling
+.superpowers
+.claude
+.github
+
+# Documentation and planning files
+findings.md
+progress.md
+task_plan.md
+AGENTS.md
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Test artifacts
+tests/
+htmlcov/
+.coverage

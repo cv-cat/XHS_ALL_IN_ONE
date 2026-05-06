@@ -1,0 +1,34 @@
+# Spider_XHS Production Configuration
+# ====================================
+# This file is intended for production deployments.
+# Copy this file and customize values for your environment.
+# Use via: CONFIG_FILE=/app/config/production.yaml
+#
+# Sensitive values (secret_key, mysql_password, fernet_key) should
+# be provided via environment variables rather than stored in this file.
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins: "https://your-domain.com"
+
+database:
+  type: "mysql"
+  mysql_host: "mysql"
+  mysql_port: 3306
+  mysql_user: "spider_xhs"
+  mysql_password: "CHANGE_ME_VIA_ENV_VAR"
+  mysql_database: "spider_xhs"
+
+security:
+  # MUST be overridden via SECRET_KEY env var
+  secret_key: "CHANGE_ME_VIA_ENV_VAR"
+  fernet_key: ""
+
+scheduler:
+  enabled: true
+  interval_seconds: 30
+
+frontend:
+  serve_static: true
+  build_dir: "./frontend/dist"

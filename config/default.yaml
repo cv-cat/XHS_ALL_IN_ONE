@@ -1,0 +1,60 @@
+# Spider_XHS Configuration
+# ========================
+# This is the default configuration file.
+# Values here can be overridden by:
+#   1. A custom YAML file specified via CONFIG_FILE env var
+#   2. Environment variables (highest priority)
+#
+# Environment variable mapping:
+#   server.host          -> SERVER_HOST
+#   server.port          -> SERVER_PORT
+#   server.cors_origins  -> BACKEND_CORS_ORIGINS
+#   database.type        -> DATABASE_TYPE
+#   database.sqlite_path -> DATABASE_SQLITE_PATH
+#   database.mysql_host  -> DATABASE_MYSQL_HOST
+#   database.mysql_port  -> DATABASE_MYSQL_PORT
+#   database.mysql_user  -> DATABASE_MYSQL_USER
+#   database.mysql_password -> DATABASE_MYSQL_PASSWORD
+#   database.mysql_database -> DATABASE_MYSQL_DATABASE
+#   security.secret_key  -> SECRET_KEY
+#   security.fernet_key  -> FERNET_KEY
+#   scheduler.enabled    -> SCHEDULER_ENABLED
+#   scheduler.interval_seconds -> SCHEDULER_INTERVAL_SECONDS
+#   frontend.serve_static -> FRONTEND_SERVE_STATIC
+#   frontend.build_dir   -> FRONTEND_BUILD_DIR
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins: "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
+
+database:
+  # "sqlite" for local development, "mysql" for production
+  type: "sqlite"
+  # SQLite database path (relative to project root)
+  sqlite_path: "./data/spider_xhs.db"
+  # MySQL connection settings (used when type=mysql)
+  mysql_host: "localhost"
+  mysql_port: 3306
+  mysql_user: "spider_xhs"
+  mysql_password: "change_me"
+  mysql_database: "spider_xhs"
+
+security:
+  # JWT signing key - MUST be changed in production
+  secret_key: "dev-only-change-me"
+  # Fernet key for encrypting cookies and API keys
+  # If empty, auto-derived from secret_key via SHA-256 + base64
+  fernet_key: ""
+
+scheduler:
+  # Enable background task scheduler (publish jobs, monitoring refresh)
+  enabled: false
+  # Polling interval in seconds
+  interval_seconds: 60
+
+frontend:
+  # Set to true to serve pre-built frontend from backend (Docker/production)
+  serve_static: false
+  # Path to the built frontend assets
+  build_dir: "./frontend/dist"
