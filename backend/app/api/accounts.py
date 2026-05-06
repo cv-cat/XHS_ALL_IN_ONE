@@ -57,6 +57,31 @@ def _select_adapter(sub_type: str, pc_adapter: XhsPcLoginAdapter, creator_adapte
     return creator_adapter if sub_type == "creator" else pc_adapter
 
 
+def _sync_creator_account_from_pc_cookie(
+    *,
+    db: Session,
+    user_id: int,
+    platform: str,
+    cookie_string: str,
+    creator_adapter: XhsCreatorLoginAdapter,
+):
+    try:
+        creator_result = creator_adapter.exchange_from_user_cookies(trans_cookies(cookie_string))
+        creator_cookies_text = json.dumps(creator_result["cookies"], ensure_ascii=False, separators=(",", ":"))
+        creator_user_info = creator_adapter.get_user_info(creator_result["cookies"])
+        upsert_platform_account_from_login(
+            db=db,
+            user_id=user_id,
+            platform=platform,
+            sub_type="creator",
+            user_info=creator_user_info,
+            cookies_text=creator_cookies_text,
+        )
+    except Exception:
+        return None
+    return True
+
+
 @router.get("")
 def get_accounts(
     platform: Optional[str] = None,
@@ -106,6 +131,14 @@ def import_cookie(
         user_info=user_info,
         cookies_text=payload.cookie_string,
     )
+    if payload.sub_type == "pc":
+        _sync_creator_account_from_pc_cookie(
+            db=db,
+            user_id=current_user.id,
+            platform=payload.platform,
+            cookie_string=payload.cookie_string,
+            creator_adapter=creator_adapter,
+        )
     db.commit()
     db.refresh(account)
     return serialize_account(account, action)

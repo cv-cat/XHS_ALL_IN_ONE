@@ -110,7 +110,7 @@ class XHSCreatorLoginApi:
 
     def check_session(self, cookies):
         api = '/api/cas/customer/web/service-ticket'
-        data = {"service": "https://creator.xiaohongshu.com", "source": "", "type": "tgt"}
+        data = {"service": "https://creator.xiaohongshu.com", "source": "official", "type": "tgt"}
 
         headers = self._get_request_headers()
         headers['content-type'] = 'application/json'
@@ -131,6 +131,45 @@ class XHSCreatorLoginApi:
         res = resp.json()
         has_session = res.get('data') is not None
         return has_session, cookies
+
+    def exchange_creator_session_from_user_cookies(self, user_cookies):
+        merged_cookies = self.generate_init_cookies()
+        merged_cookies.update(user_cookies)
+
+        api = '/api/cas/customer/web/service-ticket'
+        data = {"service": "https://creator.xiaohongshu.com", "source": "official", "type": "tgt"}
+
+        headers = self._get_request_headers()
+        headers['content-type'] = 'application/json'
+        sign_h = generate_xsc(merged_cookies['a1'], api, data)
+        headers.update(sign_h)
+
+        data_str = json.dumps(data, separators=(',', ':'), ensure_ascii=False)
+        resp = requests.post(
+            self.customer_url + api,
+            headers=headers,
+            cookies=merged_cookies,
+            data=data_str.encode('utf-8'),
+            timeout=REQUEST_TIMEOUT
+        )
+        for key, value in resp.cookies.items():
+            merged_cookies[key] = value
+
+        res = resp.json()
+        if not res.get('success'):
+            return False, res.get('msg', 'creator session exchange failed'), {
+                'cookies': merged_cookies,
+                'res_json': res,
+            }
+        if res.get('data') is None and not any(key in merged_cookies for key in ('customer_session', 'web_session')):
+            return False, res.get('msg', 'creator session exchange missing login session'), {
+                'cookies': merged_cookies,
+                'res_json': res,
+            }
+        return True, res.get('msg', 'success'), {
+            'cookies': merged_cookies,
+            'res_json': res,
+        }
 
     def check_qrcode_status(self, qr_id, cookies):
         api = '/api/cas/customer/web/qr-code'

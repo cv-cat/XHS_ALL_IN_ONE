@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Protocol
 
 import requests
@@ -96,6 +97,32 @@ class ImageAiClient(Protocol):
         ...
 
 
+def _candidate_response_encodings(response: requests.Response) -> list[str]:
+    encodings: list[str] = []
+    for encoding in ("utf-8-sig", "utf-8", response.apparent_encoding, response.encoding):
+        normalized = (encoding or "").strip()
+        if normalized and normalized.lower() not in {item.lower() for item in encodings}:
+            encodings.append(normalized)
+    return encodings
+
+
+def _load_json_response(response: requests.Response) -> Any:
+    raw = response.content
+    last_error: Exception | None = None
+    for encoding in _candidate_response_encodings(response):
+        try:
+            return json.loads(raw.decode(encoding))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            last_error = exc
+
+    try:
+        return json.loads(raw.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError as exc:
+        last_error = exc
+
+    raise ValueError("AI response is not valid JSON") from last_error
+
+
 class OpenAICompatibleTextClient:
     def _complete(
         self,
@@ -128,7 +155,7 @@ class OpenAICompatibleTextClient:
             timeout=60,
         )
         response.raise_for_status()
-        payload = response.json()
+        payload = _load_json_response(response)
         try:
             content = payload["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
@@ -291,11 +318,12 @@ class OpenAICompatibleImageClient:
         except requests.HTTPError as exc:
             detail = ""
             try:
-                detail = exc.response.json().get("error", {}).get("message", "") if exc.response else ""
+                error_payload = _load_json_response(exc.response) if exc.response else {}
+                detail = error_payload.get("error", {}).get("message", "") if isinstance(error_payload, dict) else ""
             except Exception:
                 pass
             raise ValueError(f"图片生成失败: {detail or exc}") from exc
-        payload = response.json()
+        payload = _load_json_response(response)
         try:
             item = payload["data"][0]
         except (KeyError, IndexError, TypeError) as exc:
@@ -351,7 +379,7 @@ class OpenAICompatibleImageClient:
             timeout=120,
         )
         response.raise_for_status()
-        payload = response.json()
+        payload = _load_json_response(response)
         try:
             content = payload["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:

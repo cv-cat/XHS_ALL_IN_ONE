@@ -164,6 +164,44 @@ def test_publish_page_uses_antd_components():
     assert "发布" in source
 
 
+def test_openai_compatible_text_client_decodes_utf8_json_when_response_headers_are_wrong(monkeypatch):
+    from backend.app.services.ai_service import OpenAICompatibleTextClient
+
+    class DummyConfig:
+        base_url = "https://api.example.test/v1"
+        model_name = "gpt-5.4"
+
+    class FakeResponse:
+        def __init__(self):
+            self.content = (
+                b'{"choices":[{"message":{"content":"'
+                + "你好，今天很适合去公园散步。".encode("utf-8")
+                + b'"}}]}'
+            )
+            self.encoding = "ISO-8859-1"
+            self.apparent_encoding = "utf-8"
+            self.headers = {"content-type": "text/event-stream"}
+
+        def raise_for_status(self):
+            return None
+
+    def fake_post(*args, **kwargs):
+        return FakeResponse()
+
+    monkeypatch.setattr("backend.app.services.ai_service.requests.post", fake_post)
+
+    client = OpenAICompatibleTextClient()
+    result = client.rewrite_note(
+        model_config=DummyConfig(),
+        api_key="test-key",
+        title="原文标题",
+        body="今天天气很好，我们去公园散步。",
+        instruction="保留中文自然表达",
+    )
+
+    assert result == "你好，今天很适合去公园散步。"
+
+
 def test_database_initialization_creates_user_table(tmp_path):
     from alembic import command
     from alembic.config import Config
@@ -432,6 +470,15 @@ class FakeCreatorLoginAdapter:
             "avatar_url": "https://example.test/creator-avatar.webp",
         }
 
+    def exchange_from_user_cookies(self, user_cookies):
+        assert user_cookies["a1"] in {"final-a1", "phone-final-a1", "cookie-a1"}
+        return {"status": "confirmed", "cookies": {"a1": user_cookies["a1"], "customer_session": "session-456"}}
+
+
+class FailingCreatorExchangeAdapter(FakeCreatorLoginAdapter):
+    def exchange_from_user_cookies(self, user_cookies):
+        raise RuntimeError("creator exchange failed")
+
 
 class FailingQrLoginAdapter:
     def create_qrcode(self):
@@ -468,13 +515,14 @@ def _register_and_get_access_token(username: str = "operator") -> str:
 
 
 def test_xhs_pc_qrcode_login_session_persists_and_confirms_account(tmp_path):
-    from backend.app.api.login_sessions import get_pc_login_adapter
+    from backend.app.api.login_sessions import get_creator_login_adapter, get_pc_login_adapter
     from backend.app.core.database import get_db
     from backend.app.core.security import decrypt_text
     from backend.app.models import AccountCookieVersion, LoginSession, PlatformAccount
 
     db_dependency = _override_database(tmp_path)
     app.dependency_overrides[get_pc_login_adapter] = lambda: FakePcLoginAdapter()
+    app.dependency_overrides[get_creator_login_adapter] = lambda: FailingCreatorExchangeAdapter()
     try:
         access_token = _register_and_get_access_token()
 
@@ -533,11 +581,12 @@ def test_xhs_pc_qrcode_login_session_persists_and_confirms_account(tmp_path):
     finally:
         app.dependency_overrides.pop(db_dependency, None)
         app.dependency_overrides.pop(get_pc_login_adapter, None)
+        app.dependency_overrides.pop(get_creator_login_adapter, None)
 
 
 def test_xhs_pc_qrcode_login_updates_existing_account_for_same_external_user(tmp_path):
     from backend.app.api.accounts import get_pc_account_adapter
-    from backend.app.api.login_sessions import get_pc_login_adapter
+    from backend.app.api.login_sessions import get_creator_login_adapter, get_pc_login_adapter
     from backend.app.core.database import get_db
     from backend.app.core.security import decrypt_text
     from backend.app.models import AccountCookieVersion, PlatformAccount
@@ -545,6 +594,7 @@ def test_xhs_pc_qrcode_login_updates_existing_account_for_same_external_user(tmp
     db_dependency = _override_database(tmp_path)
     app.dependency_overrides[get_pc_login_adapter] = lambda: FakePcLoginAdapter()
     app.dependency_overrides[get_pc_account_adapter] = lambda: FakePcLoginAdapter()
+    app.dependency_overrides[get_creator_login_adapter] = lambda: FailingCreatorExchangeAdapter()
     try:
         access_token = _register_and_get_access_token("qr-upsert-operator")
 
@@ -600,6 +650,7 @@ def test_xhs_pc_qrcode_login_updates_existing_account_for_same_external_user(tmp
         app.dependency_overrides.pop(db_dependency, None)
         app.dependency_overrides.pop(get_pc_login_adapter, None)
         app.dependency_overrides.pop(get_pc_account_adapter, None)
+        app.dependency_overrides.pop(get_creator_login_adapter, None)
 
 
 def test_xhs_creator_qrcode_login_session_persists_and_confirms_account(tmp_path):
@@ -665,10 +716,11 @@ def test_xhs_creator_qrcode_login_session_persists_and_confirms_account(tmp_path
 
 
 def test_xhs_pc_qrcode_reports_adapter_failure_as_bad_gateway(tmp_path):
-    from backend.app.api.login_sessions import get_pc_login_adapter
+    from backend.app.api.login_sessions import get_creator_login_adapter, get_pc_login_adapter
 
     db_dependency = _override_database(tmp_path)
     app.dependency_overrides[get_pc_login_adapter] = lambda: FailingQrLoginAdapter()
+    app.dependency_overrides[get_creator_login_adapter] = lambda: FailingCreatorExchangeAdapter()
     try:
         access_token = _register_and_get_access_token("qr-failure-operator")
         response = client.post(
@@ -681,16 +733,75 @@ def test_xhs_pc_qrcode_reports_adapter_failure_as_bad_gateway(tmp_path):
     finally:
         app.dependency_overrides.pop(db_dependency, None)
         app.dependency_overrides.pop(get_pc_login_adapter, None)
+        app.dependency_overrides.pop(get_creator_login_adapter, None)
+
+
+def test_xhs_pc_qrcode_login_auto_syncs_creator_account(tmp_path):
+    from backend.app.api.login_sessions import get_creator_login_adapter, get_pc_login_adapter
+    from backend.app.core.database import get_db
+    from backend.app.core.security import decrypt_text
+    from backend.app.models import AccountCookieVersion, PlatformAccount
+
+    db_dependency = _override_database(tmp_path)
+    app.dependency_overrides[get_pc_login_adapter] = lambda: FakePcLoginAdapter()
+    app.dependency_overrides[get_creator_login_adapter] = lambda: FakeCreatorLoginAdapter()
+    try:
+        access_token = _register_and_get_access_token("pc-auto-creator-operator")
+
+        created = client.post(
+            "/api/xhs/login-sessions/pc/qrcode",
+            headers={"Authorization": f"Bearer {access_token}"},
+        ).json()
+        poll_response = client.get(
+            f"/api/xhs/login-sessions/{created['session_id']}",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert poll_response.status_code == 200
+        payload = poll_response.json()
+        assert payload["status"] == "confirmed"
+        assert payload["account"]["sub_type"] == "pc"
+        assert payload["creator_account"]["sub_type"] == "creator"
+        assert payload["creator_account"]["nickname"] == "creator-cat"
+
+        accounts_response = client.get(
+            "/api/accounts?platform=xhs",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        accounts_payload = accounts_response.json()
+        assert accounts_payload["total"] == 2
+        assert {item["sub_type"] for item in accounts_payload["items"]} == {"pc", "creator"}
+
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            accounts = db.query(PlatformAccount).order_by(PlatformAccount.sub_type.asc()).all()
+            assert len(accounts) == 2
+            creator_account = next(account for account in accounts if account.sub_type == "creator")
+            assert creator_account.external_user_id == "creator-user-1"
+            creator_cookie = (
+                db.query(AccountCookieVersion)
+                .filter(AccountCookieVersion.platform_account_id == creator_account.id)
+                .order_by(AccountCookieVersion.id.desc())
+                .one()
+            )
+            assert decrypt_text(creator_cookie.encrypted_cookies) == '{"a1":"final-a1","customer_session":"session-456"}'
+        finally:
+            db.close()
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+        app.dependency_overrides.pop(get_pc_login_adapter, None)
+        app.dependency_overrides.pop(get_creator_login_adapter, None)
 
 
 def test_xhs_pc_phone_login_session_sends_code_and_confirms_account(tmp_path):
-    from backend.app.api.login_sessions import get_pc_login_adapter
+    from backend.app.api.login_sessions import get_creator_login_adapter, get_pc_login_adapter
     from backend.app.core.database import get_db
     from backend.app.core.security import decrypt_text
     from backend.app.models import LoginSession, PlatformAccount
 
     db_dependency = _override_database(tmp_path)
     app.dependency_overrides[get_pc_login_adapter] = lambda: FakePhoneLoginAdapter()
+    app.dependency_overrides[get_creator_login_adapter] = lambda: FailingCreatorExchangeAdapter()
     try:
         access_token = _register_and_get_access_token("phone-operator")
 
@@ -734,6 +845,7 @@ def test_xhs_pc_phone_login_session_sends_code_and_confirms_account(tmp_path):
     finally:
         app.dependency_overrides.pop(db_dependency, None)
         app.dependency_overrides.pop(get_pc_login_adapter, None)
+        app.dependency_overrides.pop(get_creator_login_adapter, None)
 
 
 def test_xhs_creator_phone_login_session_sends_code_and_confirms_account(tmp_path):
@@ -894,7 +1006,7 @@ def test_account_cookie_import_creates_account_and_health_check_updates_status(t
     db_dependency = _override_database(tmp_path)
     fake_adapter = FakeCookieAccountAdapter()
     app.dependency_overrides[get_pc_account_adapter] = lambda: fake_adapter
-    app.dependency_overrides[get_creator_account_adapter] = lambda: fake_adapter
+    app.dependency_overrides[get_creator_account_adapter] = lambda: FailingCreatorExchangeAdapter()
     try:
         access_token = _register_and_get_access_token("cookie-operator")
         before_create = shanghai_now()
@@ -937,6 +1049,54 @@ def test_account_cookie_import_creates_account_and_health_check_updates_status(t
         app.dependency_overrides.pop(get_creator_account_adapter, None)
 
 
+def test_account_cookie_import_for_pc_auto_syncs_creator_account(tmp_path):
+    from backend.app.api.accounts import get_creator_account_adapter, get_pc_account_adapter
+    from backend.app.core.database import get_db
+    from backend.app.core.security import decrypt_text
+    from backend.app.models import AccountCookieVersion, PlatformAccount
+
+    db_dependency = _override_database(tmp_path)
+    fake_pc_adapter = FakeCookieAccountAdapter()
+    app.dependency_overrides[get_pc_account_adapter] = lambda: fake_pc_adapter
+    app.dependency_overrides[get_creator_account_adapter] = lambda: FakeCreatorLoginAdapter()
+    try:
+        access_token = _register_and_get_access_token("cookie-auto-creator-operator")
+
+        import_response = client.post(
+            "/api/accounts/import-cookie",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"platform": "xhs", "sub_type": "pc", "cookie_string": "a1=cookie-a1; web_session=session"},
+        )
+        assert import_response.status_code == 200
+
+        accounts_response = client.get(
+            "/api/accounts?platform=xhs",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        accounts_payload = accounts_response.json()
+        assert accounts_payload["total"] == 2
+        assert {item["sub_type"] for item in accounts_payload["items"]} == {"pc", "creator"}
+
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            accounts = db.query(PlatformAccount).order_by(PlatformAccount.sub_type.asc()).all()
+            assert len(accounts) == 2
+            creator_account = next(account for account in accounts if account.sub_type == "creator")
+            creator_cookie = (
+                db.query(AccountCookieVersion)
+                .filter(AccountCookieVersion.platform_account_id == creator_account.id)
+                .order_by(AccountCookieVersion.id.desc())
+                .one()
+            )
+            assert decrypt_text(creator_cookie.encrypted_cookies) == '{"a1":"cookie-a1","customer_session":"session-456"}'
+        finally:
+            db.close()
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+        app.dependency_overrides.pop(get_pc_account_adapter, None)
+        app.dependency_overrides.pop(get_creator_account_adapter, None)
+
+
 def test_account_check_refreshes_xhs_self_profile_metrics(tmp_path):
     from backend.app.api.accounts import (
         get_creator_account_adapter,
@@ -948,7 +1108,7 @@ def test_account_check_refreshes_xhs_self_profile_metrics(tmp_path):
     fake_adapter = FakeCookieAccountAdapter()
     FakeSelfProfileAdapter.calls = []
     app.dependency_overrides[get_pc_account_adapter] = lambda: fake_adapter
-    app.dependency_overrides[get_creator_account_adapter] = lambda: fake_adapter
+    app.dependency_overrides[get_creator_account_adapter] = lambda: FailingCreatorExchangeAdapter()
     app.dependency_overrides[get_xhs_self_profile_adapter] = lambda: FakeSelfProfileAdapter()
     try:
         access_token = _register_and_get_access_token("profile-metrics-operator")

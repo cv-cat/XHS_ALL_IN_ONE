@@ -69,6 +69,28 @@ def _mask_phone(phone: str) -> str:
     return f"{phone[:3]}****{phone[-4:]}"
 
 
+def _sync_creator_account_from_pc_login(
+    *,
+    db: Session,
+    user_id: int,
+    pc_cookies: dict,
+    creator_adapter: XhsCreatorLoginAdapter,
+) -> dict | None:
+    try:
+        creator_result = creator_adapter.exchange_from_user_cookies(pc_cookies)
+        creator_user_info = creator_adapter.get_user_info(creator_result["cookies"])
+        creator_account, creator_action = _create_account_from_login(
+            db=db,
+            user_id=user_id,
+            sub_type="creator",
+            user_info=creator_user_info,
+            cookies=creator_result["cookies"],
+        )
+    except Exception:
+        return None
+    return serialize_account(creator_account, creator_action)
+
+
 def _create_account_from_login(
     *,
     db: Session,
@@ -192,6 +214,7 @@ def login_session(
     session.encrypted_temp_cookies = encrypt_text(_dump_json(result["cookies"]))
 
     account_payload = None
+    creator_account_payload = None
     if session.status == "confirmed":
         account, action = _create_account_from_login(
             db=db,
@@ -201,9 +224,22 @@ def login_session(
             cookies=result["cookies"],
         )
         account_payload = serialize_account(account, action)
+        if account_sub_type == "pc":
+            creator_account_payload = _sync_creator_account_from_pc_login(
+                db=db,
+                user_id=current_user.id,
+                pc_cookies=result["cookies"],
+                creator_adapter=creator_adapter,
+            )
 
     db.commit()
-    return {"session_id": session.id, "status": session.status, "qr_url": session.qr_url, "account": account_payload}
+    return {
+        "session_id": session.id,
+        "status": session.status,
+        "qr_url": session.qr_url,
+        "account": account_payload,
+        "creator_account": creator_account_payload,
+    }
 
 
 @router.post("/pc/phone/send-code")
@@ -238,8 +274,9 @@ def pc_phone_confirm(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     adapter: XhsPcLoginAdapter = Depends(get_pc_login_adapter),
+    creator_adapter: XhsCreatorLoginAdapter = Depends(get_creator_login_adapter),
 ):
-    return _confirm_phone_login(payload, current_user, db, adapter, "pc")
+    return _confirm_phone_login(payload, current_user, db, adapter, "pc", creator_adapter)
 
 
 @router.post("/creator/phone/send-code")
@@ -275,10 +312,17 @@ def creator_phone_confirm(
     db: Session = Depends(get_db),
     adapter: XhsCreatorLoginAdapter = Depends(get_creator_login_adapter),
 ):
-    return _confirm_phone_login(payload, current_user, db, adapter, "creator")
+    return _confirm_phone_login(payload, current_user, db, adapter, "creator", None)
 
 
-def _confirm_phone_login(payload: PhoneConfirmRequest, current_user: User, db: Session, adapter, sub_type: str):
+def _confirm_phone_login(
+    payload: PhoneConfirmRequest,
+    current_user: User,
+    db: Session,
+    adapter,
+    sub_type: str,
+    creator_adapter: XhsCreatorLoginAdapter | None,
+):
     session = db.get(LoginSession, payload.session_id)
     if (
         session is None
@@ -303,9 +347,18 @@ def _confirm_phone_login(payload: PhoneConfirmRequest, current_user: User, db: S
         user_info=user_info,
         cookies=result["cookies"],
     )
+    creator_account_payload = None
+    if sub_type == "pc" and creator_adapter is not None:
+        creator_account_payload = _sync_creator_account_from_pc_login(
+            db=db,
+            user_id=current_user.id,
+            pc_cookies=result["cookies"],
+            creator_adapter=creator_adapter,
+        )
     db.commit()
     return {
         "session_id": session.id,
         "status": session.status,
         "account": serialize_account(account, action),
+        "creator_account": creator_account_payload,
     }

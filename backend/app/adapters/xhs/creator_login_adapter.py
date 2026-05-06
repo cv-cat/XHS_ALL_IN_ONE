@@ -6,6 +6,16 @@ from backend.app.adapters.xhs.request_env import direct_xhs_request_env
 
 
 class XhsCreatorLoginAdapter:
+    def exchange_from_user_cookies(self, user_cookies: dict[str, Any]) -> dict[str, Any]:
+        with direct_xhs_request_env():
+            from apis.xhs_creator_login_apis import XHSCreatorLoginApi
+
+            api = XHSCreatorLoginApi()
+            success, message, payload = api.exchange_creator_session_from_user_cookies(dict(user_cookies))
+        if not success or not payload:
+            raise RuntimeError(message)
+        return {"status": "confirmed", "cookies": payload["cookies"]}
+
     def create_qrcode(self) -> dict[str, Any]:
         with direct_xhs_request_env():
             from apis.xhs_creator_login_apis import XHSCreatorLoginApi
