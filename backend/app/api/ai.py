@@ -28,6 +28,7 @@ class GenerateNoteRequest(BaseModel):
     topic: str = Field(min_length=1, max_length=300)
     reference: str = Field(default="", max_length=4000)
     instruction: str = Field(default="", max_length=1000)
+    system_prompt: str = Field(default="", max_length=2000)
 
 
 class GenerateTitleRequest(BaseModel):
@@ -264,6 +265,7 @@ def generate_note(
             topic=payload.topic,
             reference=payload.reference,
             instruction=payload.instruction,
+            system_prompt=payload.system_prompt,
         ),
     )
     draft = AiDraft(

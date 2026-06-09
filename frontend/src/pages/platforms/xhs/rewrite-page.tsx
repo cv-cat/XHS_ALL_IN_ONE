@@ -41,6 +41,7 @@ import {
   Popconfirm,
   Row,
   Segmented,
+  Select,
   Space,
   Spin,
   Tabs,
@@ -59,6 +60,7 @@ import {
   fetchDraftAssets,
   fetchDrafts,
   fetchGeneratedImageAssets,
+  fetchPromptTemplates,
   fetchSavedNote,
   fetchUserImages,
   generateImageWithAi,
@@ -74,7 +76,7 @@ import {
 } from "../../../lib/api";
 import { formatShanghaiTime } from "../../../lib/time";
 import type { DraftAsset } from "../../../lib/api";
-import type { Draft, GeneratedImageAsset, SavedNote, UserImageFile } from "../../../types";
+import type { Draft, GeneratedImageAsset, PromptTemplate, SavedNote, UserImageFile } from "../../../types";
 
 const { Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -201,6 +203,9 @@ export function XhsDraftsPage() {
   const [instruction, setInstruction] = useState("保留事实，增强小红书种草感，语气自然。");
   const [topic, setTopic] = useState("");
   const [reference, setReference] = useState("");
+  const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | number | null>(null);
+  const [genSystemPrompt, setGenSystemPrompt] = useState("");
   const [titleOptions, setTitleOptions] = useState<string[]>([]);
   const [tagOptions, setTagOptions] = useState<string[]>([]);
   const [systemPrompt, setSystemPrompt] = useState("你是小红书内容创作助手，擅长写吸引人的标题和正文。");
@@ -235,6 +240,7 @@ export function XhsDraftsPage() {
   const [refPickerUrlInput, setRefPickerUrlInput] = useState("");
 
   const selectedDraft = drafts.find((draft) => draft.id === selectedDraftId) ?? null;
+  const selectedTemplate = promptTemplates.find((t) => t.id === selectedTemplateId) ?? null;
   const imageAssets = sourceAssets.filter((a) => a.asset_type === "image");
   const hasImageAssets = imageAssets.length > 0;
   const hasVideoAssets = sourceAssets.some((a) => a.asset_type === "video");
@@ -448,6 +454,17 @@ export function XhsDraftsPage() {
     }
   }
 
+  function applyTemplate(id: string | number | null) {
+    setSelectedTemplateId(id);
+    const tpl = promptTemplates.find((t) => t.id === id) ?? null;
+    if (tpl) {
+      setInstruction(tpl.instruction);
+      setGenSystemPrompt(tpl.system_prompt);
+    } else {
+      setGenSystemPrompt("");
+    }
+  }
+
   async function handleGenerateNote() {
     if (!topic.trim()) {
       setError("请先填写选题。");
@@ -461,6 +478,7 @@ export function XhsDraftsPage() {
         topic: topic.trim(),
         reference,
         instruction,
+        system_prompt: genSystemPrompt,
       });
       upsertDraft(draft, "rewrite");
       setMessage(`已生成草稿 #${draft.id}，可继续编辑、配图后送入发布中心。`);
@@ -567,6 +585,10 @@ export function XhsDraftsPage() {
 
   useEffect(() => {
     void loadDrafts();
+  }, []);
+
+  useEffect(() => {
+    void fetchPromptTemplates().then((r) => setPromptTemplates(r.items)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -1310,22 +1332,47 @@ export function XhsDraftsPage() {
 
   // ---- Generate mode: centered card ----
   function renderGenerateMode() {
+    const templateGroups = promptTemplates.reduce<Record<string, PromptTemplate[]>>((acc, t) => {
+      (acc[t.category] ||= []).push(t);
+      return acc;
+    }, {});
+    const templateOptions = Object.entries(templateGroups).map(([category, items]) => ({
+      label: category,
+      title: category,
+      options: items.map((t) => ({ label: t.name, value: t.id })),
+    }));
     return (
       <div style={{ maxWidth: 640, margin: "0 auto" }}>
         <Card title="AI 笔记生成">
           <Form layout="vertical">
+            <Form.Item label="模板（小红书风格，可选）">
+              <Select
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                placeholder="选择一个模板，自动套用写作风格与指令"
+                value={selectedTemplateId ?? undefined}
+                onChange={(v) => applyTemplate(v ?? null)}
+                options={templateOptions}
+              />
+              {selectedTemplate && (
+                <Text type="secondary" style={{ fontSize: 12, display: "block", marginTop: 6 }}>
+                  {selectedTemplate.description}
+                </Text>
+              )}
+            </Form.Item>
             <Form.Item label="选题" required>
               <Input
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
-                placeholder="例如：通勤低卡早餐怎么搭配"
+                placeholder={selectedTemplate?.topic_hint || "例如：通勤低卡早餐怎么搭配"}
               />
             </Form.Item>
             <Form.Item label="参考材料">
               <TextArea
                 value={reference}
                 onChange={(e) => setReference(e.target.value)}
-                placeholder="竞品笔记、卖点、评论洞察或人群信息"
+                placeholder={selectedTemplate?.reference_hint || "竞品笔记、卖点、评论洞察或人群信息"}
                 rows={6}
               />
             </Form.Item>

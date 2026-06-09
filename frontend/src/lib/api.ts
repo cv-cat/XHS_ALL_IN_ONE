@@ -52,6 +52,7 @@ import type {
   PlatformAccount,
   PlatformMeta,
   PlatformUser,
+  PromptTemplate,
   PublishAsset,
   PublishAssetPayload,
   PublishJob,
@@ -522,6 +523,13 @@ export async function rewriteDraftWithAi(payload: RewriteDraftPayload): Promise<
 
 export async function generateNoteWithAi(payload: GenerateNotePayload): Promise<Draft> {
   const response = await http.post<Draft>("/ai/generate-note", payload);
+  return response.data;
+}
+
+export async function fetchPromptTemplates(category?: string): Promise<Paginated<PromptTemplate>> {
+  const response = await http.get<Paginated<PromptTemplate>>("/prompt-templates", {
+    params: category ? { category } : undefined,
+  });
   return response.data;
 }
 

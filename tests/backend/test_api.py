@@ -4439,8 +4439,8 @@ def test_ai_text_generation_endpoints_use_default_model_and_create_tasks(tmp_pat
         def rewrite_note(self, *, model_config, api_key, title, body, instruction):
             raise AssertionError("rewrite_note should not be called")
 
-        def generate_note(self, *, model_config, api_key, topic, reference, instruction):
-            self.calls.append(("generate_note", model_config.model_name, api_key, topic, reference, instruction))
+        def generate_note(self, *, model_config, api_key, topic, reference, instruction, system_prompt=""):
+            self.calls.append(("generate_note", model_config.model_name, api_key, topic, reference, instruction, system_prompt))
             return {"title": f"{topic} 标题", "body": f"{topic} 正文 {reference} {instruction}".strip()}
 
         def generate_titles(self, *, model_config, api_key, title, body, count):
@@ -4520,7 +4520,88 @@ def test_ai_text_generation_endpoints_use_default_model_and_create_tasks(tmp_pat
             "低卡早餐",
             "参考笔记",
             "更具体",
+            "",
         )
+    finally:
+        app.dependency_overrides.pop(get_text_ai_client, None)
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_prompt_templates_requires_authentication(tmp_path):
+    db_dependency = _override_database(tmp_path)
+    try:
+        response = client.get("/api/prompt-templates")
+        assert response.status_code == 401
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_prompt_templates_list_returns_builtins(tmp_path):
+    db_dependency = _override_database(tmp_path)
+    token = _register_and_get_access_token("prompt-template-owner")
+    try:
+        response = client.get(
+            "/api/prompt-templates",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total"] >= 1
+        first = payload["items"][0]
+        assert first["is_builtin"] is True
+        assert {"id", "name", "category", "system_prompt", "instruction"} <= set(first.keys())
+
+        category = payload["items"][0]["category"]
+        filtered = client.get(
+            "/api/prompt-templates",
+            params={"category": category},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert filtered.status_code == 200
+        assert filtered.json()["total"] >= 1
+        assert all(item["category"] == category for item in filtered.json()["items"])
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_generate_note_forwards_template_system_prompt(tmp_path):
+    from backend.app.api.ai import get_text_ai_client
+
+    class CapturingClient:
+        def __init__(self):
+            self.system_prompt = None
+
+        def generate_note(self, *, model_config, api_key, topic, reference, instruction, system_prompt=""):
+            self.system_prompt = system_prompt
+            return {"title": topic, "body": "正文"}
+
+    capturing = CapturingClient()
+    db_dependency = _override_database(tmp_path)
+    token = _register_and_get_access_token("system-prompt-owner")
+    try:
+        app.dependency_overrides[get_text_ai_client] = lambda: capturing
+        model_response = client.post(
+            "/api/model-configs",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "name": "Default Text",
+                "model_type": "text",
+                "provider": "openai-compatible",
+                "model_name": "gpt-system-prompt-test",
+                "base_url": "https://api.example.test/v1",
+                "api_key": "sk-secret",
+                "is_default": True,
+            },
+        )
+        assert model_response.status_code == 200
+
+        response = client.post(
+            "/api/ai/generate-note",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"platform": "xhs", "topic": "探店", "system_prompt": "你是资深探店博主"},
+        )
+        assert response.status_code == 200
+        assert capturing.system_prompt == "你是资深探店博主"
     finally:
         app.dependency_overrides.pop(get_text_ai_client, None)
         app.dependency_overrides.pop(db_dependency, None)
