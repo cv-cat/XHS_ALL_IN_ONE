@@ -60,7 +60,7 @@ export function XhsPromptTemplatesPage() {
       setTemplates(result.items);
       setError(null);
     } catch {
-      setError("加载提示词模板失败。");
+      setError("加载文案模板失败。");
     } finally {
       setIsLoading(false);
     }
@@ -185,7 +185,7 @@ export function XhsPromptTemplatesPage() {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <PageHeader
         eyebrow="XHS Prompt Templates"
-        title="提示词模板"
+        title="文案模板"
         description="管理小红书风格的原创生成模板，内置模板可一键存为自己的副本再编辑。在「草稿工坊 → 生成新草稿」中选用。"
         action={
           <Space>

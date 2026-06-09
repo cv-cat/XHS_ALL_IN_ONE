@@ -1345,7 +1345,7 @@ export function XhsDraftsPage() {
       <div style={{ maxWidth: 640, margin: "0 auto" }}>
         <Card title="AI 笔记生成">
           <Form layout="vertical">
-            <Form.Item label="模板（小红书风格，可选）">
+            <Form.Item label="文案模板（小红书风格，可选）">
               <Select
                 allowClear
                 showSearch
