@@ -382,6 +382,16 @@ export type PromptTemplate = {
   system_prompt: string;
 };
 
+export type PromptTemplatePayload = {
+  name: string;
+  category?: string;
+  description?: string;
+  topic_hint?: string;
+  reference_hint?: string;
+  instruction?: string;
+  system_prompt?: string;
+};
+
 export type GenerateTitlePayload = {
   title?: string;
   body: string;

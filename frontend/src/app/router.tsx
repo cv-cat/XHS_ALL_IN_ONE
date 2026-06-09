@@ -20,6 +20,7 @@ import { XhsKeywordsPage } from "../pages/platforms/xhs/keywords-page";
 import { XhsLibraryPage } from "../pages/platforms/xhs/library-page";
 import { XhsMonitoringPage } from "../pages/platforms/xhs/monitoring-page";
 import { XhsImageStudioPage } from "../pages/platforms/xhs/image-studio-page";
+import { XhsPromptTemplatesPage } from "../pages/platforms/xhs/prompt-templates-page";
 import { XhsPublishPage } from "../pages/platforms/xhs/publish-page";
 import { XhsVideoStudioPage } from "../pages/platforms/xhs/video-studio-page";
 import { XhsSectionPage } from "../pages/platforms/xhs/xhs-section-page";
@@ -67,6 +68,7 @@ export function AppRouter() {
           <Route path="/platforms/xhs/crawler" element={<XhsCrawlerPage />} />
           <Route path="/platforms/xhs/keywords" element={<XhsKeywordsPage />} />
           <Route path="/platforms/xhs/library" element={<XhsLibraryPage />} />
+          <Route path="/platforms/xhs/prompt-templates" element={<XhsPromptTemplatesPage />} />
           <Route path="/platforms/xhs/drafts" element={<XhsDraftsPage />} />
           <Route path="/platforms/xhs/benchmarks" element={<XhsBenchmarksPage />} />
           <Route path="/platforms/xhs/image-studio" element={<XhsImageStudioPage />} />

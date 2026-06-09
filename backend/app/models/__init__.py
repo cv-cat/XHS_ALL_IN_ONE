@@ -7,6 +7,7 @@ from backend.app.models.monitoring import MonitoringSnapshot, MonitoringTarget
 from backend.app.models.note import Note, NoteAsset, NoteComment, Tag, note_tags
 from backend.app.models.notification import Notification
 from backend.app.models.platform_account import AccountCookieVersion, PlatformAccount
+from backend.app.models.prompt_template import PromptTemplate
 from backend.app.models.publish import PublishAsset, PublishJob
 from backend.app.models.task import Task
 from backend.app.models.user import User
@@ -29,6 +30,7 @@ __all__ = [
     "NoteComment",
     "Notification",
     "PlatformAccount",
+    "PromptTemplate",
     "PublishAsset",
     "PublishJob",
     "Tag",

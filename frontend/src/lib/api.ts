@@ -53,6 +53,7 @@ import type {
   PlatformMeta,
   PlatformUser,
   PromptTemplate,
+  PromptTemplatePayload,
   PublishAsset,
   PublishAssetPayload,
   PublishJob,
@@ -531,6 +532,20 @@ export async function fetchPromptTemplates(category?: string): Promise<Paginated
     params: category ? { category } : undefined,
   });
   return response.data;
+}
+
+export async function createPromptTemplate(payload: PromptTemplatePayload): Promise<PromptTemplate> {
+  const response = await http.post<PromptTemplate>("/prompt-templates", payload);
+  return response.data;
+}
+
+export async function updatePromptTemplate(id: number, payload: Partial<PromptTemplatePayload>): Promise<PromptTemplate> {
+  const response = await http.patch<PromptTemplate>(`/prompt-templates/${id}`, payload);
+  return response.data;
+}
+
+export async function deletePromptTemplate(id: number): Promise<void> {
+  await http.delete(`/prompt-templates/${id}`);
 }
 
 export async function generateTitleOptions(payload: GenerateTitlePayload): Promise<{ items: string[] }> {

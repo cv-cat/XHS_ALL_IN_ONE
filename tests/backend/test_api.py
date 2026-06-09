@@ -4564,6 +4564,49 @@ def test_prompt_templates_list_returns_builtins(tmp_path):
         app.dependency_overrides.pop(db_dependency, None)
 
 
+def test_prompt_templates_crud_is_user_scoped(tmp_path):
+    db_dependency = _override_database(tmp_path)
+    owner_token = _register_and_get_access_token("prompt-crud-owner")
+    other_token = _register_and_get_access_token("prompt-crud-other")
+    owner_headers = {"Authorization": f"Bearer {owner_token}"}
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+    try:
+        builtin_total = client.get("/api/prompt-templates", headers=owner_headers).json()["total"]
+
+        created = client.post(
+            "/api/prompt-templates",
+            headers=owner_headers,
+            json={"name": "我的探店模板", "category": "探店/美食", "system_prompt": "你是探店博主"},
+        )
+        assert created.status_code == 200
+        template = created.json()
+        assert template["is_builtin"] is False
+        template_id = template["id"]
+
+        dup = client.post("/api/prompt-templates", headers=owner_headers, json={"name": "我的探店模板"})
+        assert dup.status_code == 400
+
+        owner_list = client.get("/api/prompt-templates", headers=owner_headers).json()
+        assert owner_list["total"] == builtin_total + 1
+
+        other_list = client.get("/api/prompt-templates", headers=other_headers).json()
+        assert other_list["total"] == builtin_total
+        assert all(item["is_builtin"] for item in other_list["items"])
+
+        assert client.patch(f"/api/prompt-templates/{template_id}", headers=other_headers, json={"name": "x"}).status_code == 404
+        assert client.delete(f"/api/prompt-templates/{template_id}", headers=other_headers).status_code == 404
+
+        updated = client.patch(f"/api/prompt-templates/{template_id}", headers=owner_headers, json={"description": "改过了"})
+        assert updated.status_code == 200
+        assert updated.json()["description"] == "改过了"
+
+        deleted = client.delete(f"/api/prompt-templates/{template_id}", headers=owner_headers)
+        assert deleted.status_code == 200
+        assert client.get("/api/prompt-templates", headers=owner_headers).json()["total"] == builtin_total
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+
+
 def test_generate_note_forwards_template_system_prompt(tmp_path):
     from backend.app.api.ai import get_text_ai_client
 
