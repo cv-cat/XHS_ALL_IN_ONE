@@ -154,4 +154,10 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     yaml_values = _load_yaml_config()
+    # Environment variables should override YAML config values.
+    # In pydantic-settings, init kwargs take priority over env vars,
+    # so we remove any YAML key whose corresponding env var is set.
+    for key in list(yaml_values.keys()):
+        if key.upper() in os.environ:
+            del yaml_values[key]
     return Settings(**yaml_values)
