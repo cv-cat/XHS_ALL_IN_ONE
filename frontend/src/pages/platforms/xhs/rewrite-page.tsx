@@ -55,6 +55,7 @@ import { Link } from "react-router-dom";
 import { PageHeader } from "../../../components/layout/app-shell";
 import {
   addDraftAsset,
+  createDraftFromNote,
   deleteDraft,
   deleteDraftAsset,
   fetchDraftAssets,
@@ -382,6 +383,17 @@ export function XhsDraftsPage() {
     clearStatus();
   }
 
+  async function handleCreateBlankDraft() {
+    clearStatus();
+    try {
+      const draft = await createDraftFromNote({ platform: "xhs" });
+      upsertDraft(draft, "rewrite");
+      setMessage(`已新建空白草稿 #${draft.id}，可自由编写标题、正文与配图。`);
+    } catch {
+      setError("新建草稿失败。");
+    }
+  }
+
   async function loadDrafts() {
     setIsLoading(true);
     setError(null);
@@ -649,6 +661,11 @@ export function XhsDraftsPage() {
                 <Text strong>草稿队列</Text>
                 <Badge count={drafts.length} style={{ backgroundColor: "#1668dc" }} />
               </Space>
+            }
+            extra={
+              <Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleCreateBlankDraft}>
+                新建
+              </Button>
             }
             styles={{ body: { padding: 0 } }}
           >
