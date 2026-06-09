@@ -462,8 +462,8 @@ export function XhsDraftsPage() {
         reference,
         instruction,
       });
-      upsertDraft(draft, "generate");
-      setMessage(`已生成草稿 #${draft.id}，可继续编辑或送入发布中心。`);
+      upsertDraft(draft, "rewrite");
+      setMessage(`已生成草稿 #${draft.id}，可继续编辑、配图后送入发布中心。`);
     } catch {
       setError("AI 生成笔记失败，请确认已配置默认文本模型。");
     } finally {
@@ -716,16 +716,19 @@ export function XhsDraftsPage() {
               <Paragraph
                 ellipsis={{ rows: 3, expandable: true, symbol: "展开" }}
                 type="secondary"
-                style={{ marginBottom: 8, fontSize: 13 }}
+                style={{ marginBottom: 0, fontSize: 13 }}
               >
                 {sourceNote.content}
               </Paragraph>
-
-              {hasImageAssets && (
+            </Card>
+          )}
+          {selectedDraft && (
+            <Card title="图片素材" size="small" style={{ marginBottom: 16 }}>
+              {!hasVideoAssets && (
                 <div style={{ marginBottom: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      <FileImageOutlined /> 图片素材 ({imageAssets.length}) — 拖拽调整顺序
+                      <FileImageOutlined /> 共 {imageAssets.length} 张 — 从图片工坊资产中选择，拖拽调整顺序
                     </Text>
                   </div>
                   <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -753,6 +756,11 @@ export function XhsDraftsPage() {
                       </div>
                     </SortableContext>
                   </DndContext>
+                  {imageAssets.length === 0 && (
+                    <Text type="secondary" style={{ fontSize: 12, display: "block", marginTop: 6 }}>
+                      还没有配图，点 + 从「图片工坊」选择已上传或 AI 生成的图片。
+                    </Text>
+                  )}
                 </div>
               )}
 
@@ -762,7 +770,7 @@ export function XhsDraftsPage() {
                     <div key={asset.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                       <Button
                         type="link" size="small" icon={<PlayCircleOutlined />}
-                        href={asset.url || sourceNote.video_url} target="_blank" rel="noopener noreferrer"
+                        href={asset.url || sourceNote?.video_url} target="_blank" rel="noopener noreferrer"
                       >
                         查看视频
                       </Button>
