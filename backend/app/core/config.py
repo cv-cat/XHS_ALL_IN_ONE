@@ -8,8 +8,13 @@ from typing import Any, Dict
 try:
     from pydantic_settings import BaseSettings, SettingsConfigDict
 except ImportError:  # pragma: no cover - handled by dependency installation
-    BaseSettings = object
-    SettingsConfigDict = dict
+    try:
+        # pydantic v1 ships BaseSettings inside pydantic itself
+        from pydantic import BaseSettings  # type: ignore[no-redef]
+        SettingsConfigDict = dict
+    except ImportError:
+        BaseSettings = object  # type: ignore[assignment,misc]
+        SettingsConfigDict = dict
 
 
 def _load_yaml_config() -> Dict[str, Any]:
@@ -151,6 +156,31 @@ class Settings(BaseSettings):
         return Path("backend/app/storage")
 
 
+def _read_env_overrides() -> Dict[str, Any]:
+    """Read environment variables that correspond to Settings fields.
+
+    This serves as a safety-net when pydantic-settings is not installed or
+    fails to read env vars (e.g. wrong package version in Docker images).
+    """
+    overrides: Dict[str, Any] = {}
+    if BaseSettings is object:
+        # pydantic-settings is not available – read ALL env vars manually.
+        for field_name, field_info in Settings.__annotations__.items():
+            env_val = os.environ.get(field_name.upper())
+            if env_val is not None:
+                # Basic type coercion for common types
+                if field_info is bool:
+                    overrides[field_name] = env_val.lower() in ("true", "1", "yes")
+                elif field_info is int:
+                    try:
+                        overrides[field_name] = int(env_val)
+                    except ValueError:
+                        pass
+                else:
+                    overrides[field_name] = env_val
+    return overrides
+
+
 @lru_cache
 def get_settings() -> Settings:
     yaml_values = _load_yaml_config()
@@ -160,4 +190,9 @@ def get_settings() -> Settings:
     for key in list(yaml_values.keys()):
         if key.upper() in os.environ:
             del yaml_values[key]
+
+    # Apply env-var overrides as a safety-net (covers missing/broken pydantic-settings)
+    env_overrides = _read_env_overrides()
+    yaml_values.update(env_overrides)
+
     return Settings(**yaml_values)
