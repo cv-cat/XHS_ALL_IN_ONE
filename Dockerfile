@@ -31,16 +31,22 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies required by some Python packages
+# Configure apt for reliability in CI environments
+ENV DEBIAN_FRONTEND=noninteractive
+RUN echo 'Acquire::Retries "3"; Acquire::http::Timeout "30";' > /etc/apt/apt.conf.d/99retry
+
+# Install all system dependencies in a single RUN to preserve package lists
+# Updated package names for Debian bookworm (python:3.11-slim base):
+# - libgl1-mesa-glx -> libgl1
+# - libglib2.0-0 remains valid
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     build-essential \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Node.js runtime (required for JS signature execution)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    ca-certificates \
+    gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 

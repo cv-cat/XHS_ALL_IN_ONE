@@ -39,3 +39,5 @@ AGENTS.md
 .superpowers
 .pytest_cache
 docx
+# 忽略 .omc 目录及其所有内容
+.omc/
