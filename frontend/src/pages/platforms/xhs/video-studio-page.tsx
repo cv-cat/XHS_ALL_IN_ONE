@@ -1,11 +1,13 @@
 import { ReloadOutlined, VideoCameraOutlined } from "@ant-design/icons";
-import { Button, Card, Empty, Typography } from "antd";
+import { Button, Card, Empty, theme, Typography } from "antd";
 
 import { PageHeader } from "../../../components/layout/app-shell";
 
 const { Text } = Typography;
 
 export function XhsVideoStudioPage() {
+  const { token } = theme.useToken();
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <PageHeader
@@ -15,12 +17,13 @@ export function XhsVideoStudioPage() {
         action={<Button icon={<ReloadOutlined />} disabled>刷新</Button>}
       />
 
-      <Card
-        style={{ background: "#1a1a1a", borderRadius: 8, border: "1px solid #303030" }}
-        styles={{ body: { padding: 48 } }}
-      >
+      <Card styles={{ body: { padding: 48 } }}>
         <Empty
-          image={<VideoCameraOutlined style={{ fontSize: 64, color: "#8c8c8c" }} />}
+          image={
+            <VideoCameraOutlined
+              style={{ fontSize: 64, color: token.colorTextSecondary }}
+            />
+          }
           imageStyle={{ height: 80 }}
           description={
             <div>

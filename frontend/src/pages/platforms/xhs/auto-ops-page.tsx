@@ -28,6 +28,7 @@ import {
   Spin,
   Statistic,
   Tag,
+  theme,
   Typography,
 } from "antd";
 import { useEffect, useState } from "react";
@@ -58,17 +59,12 @@ function getStatusTag(s: string) {
   return <Tag color={cfg.color}>{cfg.label}</Tag>;
 }
 
-const panelStyle: React.CSSProperties = {
-  background: "#1a1a1a",
-  borderRadius: 8,
-  border: "1px solid #303030",
-};
-
 const cardBodyStyle: React.CSSProperties = {
   padding: 16,
 };
 
 export function AutoOpsPage() {
+  const { token } = theme.useToken();
   const [tasks, setTasks] = useState<AutoTask[]>([]);
   const [pcAccounts, setPcAccounts] = useState<PlatformAccount[]>([]);
   const [creatorAccounts, setCreatorAccounts] = useState<PlatformAccount[]>([]);
@@ -288,16 +284,20 @@ export function AutoOpsPage() {
 
       {/* Task List */}
       {isLoading ? (
-        <Card style={panelStyle} styles={{ body: cardBodyStyle }}>
+        <Card styles={{ body: cardBodyStyle }}>
           <div style={{ textAlign: "center", padding: 48 }}>
             <Spin size="large" />
-            <Paragraph style={{ color: "#8c8c8c", marginTop: 16 }}>正在加载自动运营任务...</Paragraph>
+            <Paragraph type="secondary" style={{ marginTop: 16 }}>
+              正在加载自动运营任务...
+            </Paragraph>
           </div>
         </Card>
       ) : tasks.length === 0 && !showCreate ? (
-        <Card style={panelStyle} styles={{ body: cardBodyStyle }}>
+        <Card styles={{ body: cardBodyStyle }}>
           <Empty
-            image={<ThunderboltOutlined style={{ fontSize: 48, color: "#8c8c8c" }} />}
+            image={
+              <ThunderboltOutlined style={{ fontSize: 48, color: token.colorTextTertiary }} />
+            }
             imageStyle={{ height: 64 }}
             description={
               <div>
@@ -315,11 +315,17 @@ export function AutoOpsPage() {
           {tasks.map((task) => (
             <Col xs={24} md={12} xl={8} key={task.id}>
               <Card
-                style={panelStyle}
-                styles={{ body: cardBodyStyle, header: { borderBottom: "1px solid #303030" } }}
+                styles={{ body: cardBodyStyle }}
                 title={
                   <Space>
-                    <ThunderboltOutlined style={{ color: task.status === "active" ? "#52c41a" : "#8c8c8c" }} />
+                    <ThunderboltOutlined
+                      style={{
+                        color:
+                          task.status === "active"
+                            ? token.colorSuccess
+                            : token.colorTextTertiary,
+                      }}
+                    />
                     <Text ellipsis style={{ maxWidth: 180 }}>
                       {task.name}
                     </Text>
@@ -347,7 +353,7 @@ export function AutoOpsPage() {
                     <Statistic
                       title="已发布"
                       value={task.total_published}
-                      valueStyle={{ fontSize: 20, color: "#e8e8e8" }}
+                      valueStyle={{ fontSize: 20 }}
                     />
                   </Col>
                 </Row>
@@ -441,12 +447,11 @@ export function AutoOpsPage() {
         <Card
           title={
             <Space>
-              <CheckCircleOutlined style={{ color: "#52c41a" }} />
+              <CheckCircleOutlined style={{ color: token.colorSuccess }} />
               <span>最近一次执行结果</span>
             </Space>
           }
-          style={panelStyle}
-          styles={{ body: cardBodyStyle, header: { borderBottom: "1px solid #303030" } }}
+          styles={{ body: cardBodyStyle }}
         >
           <Descriptions column={{ xs: 1, md: 2, lg: 4 }} size="small">
             <Descriptions.Item label="关键词">{lastRunResult.keyword}</Descriptions.Item>
@@ -480,8 +485,7 @@ export function AutoOpsPage() {
               <span>新建自动运营任务</span>
             </Space>
           }
-          style={panelStyle}
-          styles={{ body: cardBodyStyle, header: { borderBottom: "1px solid #303030" } }}
+          styles={{ body: cardBodyStyle }}
           extra={
             <Button type="text" onClick={() => setShowCreate(false)}>
               取消

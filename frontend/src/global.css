@@ -26,6 +26,26 @@ body {
   background: #555;
 }
 
+html[data-theme="dark"] {
+  scrollbar-color: #434343 #1f1f1f;
+}
+
+html[data-theme="light"] {
+  scrollbar-color: #bfbfbf #f5f5f5;
+}
+
+html[data-theme="light"] ::-webkit-scrollbar-track {
+  background: #f5f5f5;
+}
+
+html[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: #bfbfbf;
+}
+
+html[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: #a6a6a6;
+}
+
 .ant-layout {
   min-height: 100vh;
 }
@@ -52,8 +72,12 @@ body {
   transition: background 0.15s ease;
 }
 
-.ant-table-tbody > tr:hover > td {
+html[data-theme="dark"] .ant-table-tbody > tr:hover > td {
   background: #1a1a2e !important;
+}
+
+html[data-theme="light"] .ant-table-tbody > tr:hover > td {
+  background: #fafafa !important;
 }
 
 .ant-tag {

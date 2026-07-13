@@ -65,8 +65,6 @@ function ModelTypeIcon({ type }: { type: ModelType }) {
   return type === "text" ? <RobotOutlined /> : <FileImageOutlined />;
 }
 
-const cardStyle = { background: "#1f1f1f", borderColor: "#303030" };
-
 export function ModelConfigPage() {
   const [configs, setConfigs] = useState<ModelConfig[]>([]);
   const [form, setForm] = useState<ModelConfigPayload>(emptyForm);
@@ -268,7 +266,6 @@ export function ModelConfigPage() {
               </Space>
             }
             extra={editingId ? <Button size="small" onClick={handleCancelEdit}>取消编辑</Button> : undefined}
-            style={cardStyle}
           >
             <Segmented
               value={form.model_type}
@@ -378,7 +375,6 @@ export function ModelConfigPage() {
                       <span>{typeLabel(type)}</span>
                     </Space>
                   }
-                  style={cardStyle}
                 >
                   {isLoading ? (
                     <div style={{ textAlign: "center", padding: 24 }}>
@@ -409,10 +405,6 @@ export function ModelConfigPage() {
                         <Card
                           key={config.id}
                           size="small"
-                          style={{
-                            background: "#262626",
-                            borderColor: "#303030",
-                          }}
                         >
                           <Space
                             style={{

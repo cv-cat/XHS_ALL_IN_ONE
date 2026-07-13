@@ -194,7 +194,7 @@ export function XhsKeywordsPage() {
       />
 
       <Card
-        style={{ background: "#1f1f1f", borderColor: "#303030", marginBottom: 24 }}
+        style={{ marginBottom: 24 }}
       >
         <Form layout="inline" style={{ flexWrap: "wrap", gap: 8 }}>
           <Form.Item>
@@ -260,7 +260,7 @@ export function XhsKeywordsPage() {
           <Spin tip="正在加载关键词组..." />
         </div>
       ) : groups.length === 0 ? (
-        <Card style={{ background: "#1f1f1f", borderColor: "#303030" }}>
+        <Card>
           <Empty description="暂无关键词组。" />
         </Card>
       ) : (
@@ -276,7 +276,6 @@ export function XhsKeywordsPage() {
                       <Tag color="blue">xhs</Tag>
                     </Space>
                   }
-                  style={{ background: "#1f1f1f", borderColor: "#303030" }}
                 >
                   <Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
                     {joinKeywords(group.keywords)}

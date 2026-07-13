@@ -4,12 +4,14 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from backend.app.core.database import get_db
 from backend.app.core.deps import get_current_user
 from backend.app.core.security import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
+from backend.app.core.time import shanghai_now
 from backend.app.models import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -27,6 +29,8 @@ class RefreshRequest(BaseModel):
 class UserResponse(BaseModel):
     id: int
     username: str
+    is_admin: bool
+    is_active: bool
 
 
 class TokenResponse(BaseModel):
@@ -37,7 +41,12 @@ class TokenResponse(BaseModel):
 
 
 def _serialize_user(user: User) -> dict:
-    return {"id": user.id, "username": user.username}
+    return {
+        "id": user.id,
+        "username": user.username,
+        "is_admin": user.is_admin,
+        "is_active": user.is_active,
+    }
 
 
 def _token_response(user: User) -> dict:
@@ -49,18 +58,67 @@ def _token_response(user: User) -> dict:
     }
 
 
+def _lock_user_registration(db: Session) -> Optional[Connection]:
+    dialect = db.get_bind().dialect.name
+    if dialect == "sqlite":
+        db.execute(text("BEGIN IMMEDIATE"))
+    elif dialect == "postgresql":
+        db.execute(text("LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE"))
+    elif dialect in {"mysql", "mariadb"}:
+        lock_connection = db.get_bind().connect()
+        try:
+            acquired = lock_connection.scalar(text("SELECT GET_LOCK('xhs_user_registration', 10)"))
+        except Exception:
+            lock_connection.invalidate()
+            lock_connection.close()
+            raise
+        if acquired != 1:
+            lock_connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="User registration is busy; retry shortly",
+            )
+        return lock_connection
+    else:
+        db.execute(select(User.id).order_by(User.id).limit(1).with_for_update())
+    return None
+
+
+def _unlock_user_registration(lock_connection: Optional[Connection]) -> None:
+    if lock_connection is None:
+        return
+    released = False
+    try:
+        released = lock_connection.scalar(text("SELECT RELEASE_LOCK('xhs_user_registration')")) == 1
+    finally:
+        if not released:
+            lock_connection.invalidate()
+        lock_connection.close()
+
+
 @router.post("/register")
 def register(credentials: AuthCredentials, db: Session = Depends(get_db)):
     username = credentials.username.strip()
-    existing_user = db.scalar(select(User).where(User.username == username))
-    if existing_user is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already exists")
+    lock_connection = _lock_user_registration(db)
+    try:
+        existing_user = db.scalar(select(User).where(User.username == username))
+        if existing_user is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already exists")
 
-    user = User(username=username, password_hash=hash_password(credentials.password))
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return _token_response(user)
+        is_first_user = db.scalar(select(User.id).limit(1)) is None
+        user = User(
+            username=username,
+            password_hash=hash_password(credentials.password),
+            is_admin=is_first_user,
+            is_active=True,
+            last_login_at=shanghai_now(),
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return _token_response(user)
+    finally:
+        _unlock_user_registration(lock_connection)
 
 
 @router.post("/login")
@@ -69,6 +127,11 @@ def login(credentials: AuthCredentials, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.username == username))
     if user is None or not verify_password(credentials.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is disabled")
+    user.last_login_at = shanghai_now()
+    db.commit()
+    db.refresh(user)
     return _token_response(user)
 
 
@@ -81,6 +144,8 @@ def refresh_token(payload: RefreshRequest, db: Session = Depends(get_db)):
     user = db.get(User, decoded["user_id"])
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is disabled")
     return {"access_token": create_access_token(user.id), "token_type": "bearer"}
 
 

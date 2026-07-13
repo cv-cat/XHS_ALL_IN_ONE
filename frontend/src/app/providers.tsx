@@ -60,6 +60,7 @@ export function AppProviders({ children }: AppProvidersProps) {
 
   useEffect(() => {
     localStorage.setItem("theme-mode", mode);
+    document.documentElement.dataset.theme = mode;
     document.body.style.background = mode === "dark" ? "#141414" : "#f5f5f5";
   }, [mode]);
 

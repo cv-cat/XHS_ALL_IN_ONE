@@ -36,6 +36,7 @@ import {
   Space,
   Tag,
   Typography,
+  theme,
 } from "antd";
 import type { MenuProps } from "antd";
 import { useCallback, useEffect, useState } from "react";
@@ -67,21 +68,28 @@ const mainNavItems: MenuProps["items"] = [
   { key: "/platforms/xhs/auto-ops", icon: <ThunderboltOutlined />, label: "自动运营" },
 ];
 
-const footerNavItems: MenuProps["items"] = [
+const footerNavItems: NonNullable<MenuProps["items"]> = [
   { key: "/tasks", icon: <ScheduleOutlined />, label: "任务中心" },
   { key: "/models", icon: <RobotOutlined />, label: "模型配置" },
   { key: "/settings", icon: <SettingOutlined />, label: "设置" },
 ];
 
-function levelColor(level: string): string {
-  if (level === "error") return "#ef4444";
-  if (level === "warning") return "#eab308";
-  return "#666";
+const adminNavItem: NonNullable<MenuProps["items"]>[number] = {
+  key: "/admin/overview",
+  icon: <SafetyCertificateOutlined />,
+  label: "管理后台",
+};
+
+function levelColor(level: string, error: string, warning: string, fallback: string): string {
+  if (level === "error") return error;
+  if (level === "warning") return warning;
+  return fallback;
 }
 
 export function AppShell() {
   const auth = useAuth();
   const { mode: themeMode, toggle: toggleTheme } = useThemeMode();
+  const { token } = theme.useToken();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
@@ -108,21 +116,21 @@ export function AppShell() {
   const selectedKeys = [location.pathname];
 
   const notificationDropdownContent = (
-    <div style={{ width: 360, background: "#1f1f1f", borderRadius: 8, border: "1px solid #303030", overflow: "hidden" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid #303030" }}>
+    <div style={{ width: 360, background: token.colorBgElevated, borderRadius: token.borderRadiusLG, border: `1px solid ${token.colorBorder}`, overflow: "hidden" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
         <Text strong style={{ fontSize: 14 }}>通知</Text>
         {unreadCount > 0 && <Button type="link" size="small" onClick={() => void handleMarkAllRead()}>全部已读</Button>}
       </div>
       <div style={{ maxHeight: 400, overflowY: "auto" }}>
         {notifications.length === 0 ? (
-          <div style={{ padding: "32px 16px", textAlign: "center", color: "rgba(255,255,255,0.35)" }}>暂无通知</div>
+          <div style={{ padding: "32px 16px", textAlign: "center", color: token.colorTextTertiary }}>暂无通知</div>
         ) : (
           <List
             dataSource={notifications}
             renderItem={(n) => (
-              <List.Item key={n.id} style={{ padding: "10px 16px", cursor: n.read ? "default" : "pointer", background: n.read ? "transparent" : "rgba(22,104,220,0.06)", borderBottom: "1px solid #262626" }} onClick={() => !n.read && void handleMarkRead(n.id)}>
+              <List.Item key={n.id} style={{ padding: "10px 16px", cursor: n.read ? "default" : "pointer", background: n.read ? "transparent" : token.colorPrimaryBg, borderBottom: `1px solid ${token.colorBorderSecondary}` }} onClick={() => !n.read && void handleMarkRead(n.id)}>
                 <List.Item.Meta
-                  avatar={<span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: levelColor(n.level), marginTop: 6 }} />}
+                  avatar={<span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: levelColor(n.level, token.colorError, token.colorWarning, token.colorTextSecondary), marginTop: 6 }} />}
                   title={<Text style={{ fontSize: 13 }}>{n.title}</Text>}
                   description={<div>{n.body && <Text type="secondary" style={{ fontSize: 12, display: "block" }}>{n.body}</Text>}<Text type="secondary" style={{ fontSize: 11 }}>{new Date(n.created_at).toLocaleString("zh-CN")}</Text></div>}
                 />
@@ -142,7 +150,7 @@ export function AppShell() {
         collapsed={collapsed}
         width={220}
         collapsedWidth={64}
-        theme="dark"
+        theme={themeMode}
         trigger={null}
         style={{
           height: "100vh",
@@ -150,42 +158,42 @@ export function AppShell() {
           left: 0,
           top: 0,
           bottom: 0,
-          borderRight: "1px solid #303030",
+          borderRight: `1px solid ${token.colorBorder}`,
           overflow: "hidden",
         }}
       >
         <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
           {/* Logo */}
           <div
-            style={{ padding: collapsed ? "14px 0" : "14px 16px", display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "space-between", borderBottom: "1px solid #303030", flexShrink: 0, cursor: "pointer" }}
+            style={{ padding: collapsed ? "14px 0" : "14px 16px", display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "space-between", borderBottom: `1px solid ${token.colorBorder}`, flexShrink: 0, cursor: "pointer" }}
             onClick={() => navigate("/platform-select")}
           >
             <Space align="center" size={collapsed ? 0 : 8}>
               <img src="/logo.jpg" alt="Logo" style={{ width: 28, height: 28, borderRadius: 6, objectFit: "cover", flexShrink: 0 }} />
-              {!collapsed && <span style={{ fontWeight: 600, fontSize: 14, color: "rgba(255,255,255,.85)" }}>Spider XHS</span>}
+              {!collapsed && <span style={{ fontWeight: 600, fontSize: 14, color: token.colorText }}>Spider XHS</span>}
             </Space>
-            {!collapsed && <Button type="text" size="small" icon={<MenuFoldOutlined />} onClick={(e) => { e.stopPropagation(); setCollapsed(true); }} style={{ color: "rgba(255,255,255,.35)" }} />}
+            {!collapsed && <Button type="text" size="small" icon={<MenuFoldOutlined />} onClick={(e) => { e.stopPropagation(); setCollapsed(true); }} style={{ color: token.colorTextTertiary }} />}
           </div>
           {collapsed && (
-            <div style={{ textAlign: "center", padding: "6px 0", borderBottom: "1px solid #262626", flexShrink: 0 }}>
-              <Button type="text" size="small" icon={<MenuUnfoldOutlined />} onClick={() => setCollapsed(false)} style={{ color: "rgba(255,255,255,.35)" }} />
+            <div style={{ textAlign: "center", padding: "6px 0", borderBottom: `1px solid ${token.colorBorderSecondary}`, flexShrink: 0 }}>
+              <Button type="text" size="small" icon={<MenuUnfoldOutlined />} onClick={() => setCollapsed(false)} style={{ color: token.colorTextTertiary }} />
             </div>
           )}
 
           {/* Main nav — scrollable */}
           <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
-            <Menu theme="dark" mode="inline" selectedKeys={selectedKeys} onClick={handleMenuClick} items={mainNavItems} style={{ borderRight: 0 }} />
+            <Menu theme={themeMode} mode="inline" selectedKeys={selectedKeys} onClick={handleMenuClick} items={mainNavItems} style={{ borderRight: 0 }} />
           </div>
 
           {/* Footer — pinned to bottom */}
-          <div style={{ flexShrink: 0, borderTop: "1px solid #303030" }}>
-            <Menu theme="dark" mode="inline" selectedKeys={selectedKeys} onClick={handleMenuClick} items={footerNavItems} style={{ borderRight: 0 }} />
-            <div style={{ padding: collapsed ? "8px 0" : "8px 16px", borderTop: "1px solid #262626", display: "flex", alignItems: "center", gap: 8, justifyContent: collapsed ? "center" : "flex-start" }}>
-              <Avatar size={22} icon={<UserOutlined />} style={{ background: "#1668dc", flexShrink: 0, fontSize: 11 }}>{(auth.user?.username ?? "U")[0].toUpperCase()}</Avatar>
+          <div style={{ flexShrink: 0, borderTop: `1px solid ${token.colorBorder}` }}>
+            <Menu theme={themeMode} mode="inline" selectedKeys={selectedKeys} onClick={handleMenuClick} items={auth.user?.is_admin ? [...footerNavItems, adminNavItem] : footerNavItems} style={{ borderRight: 0 }} />
+            <div style={{ padding: collapsed ? "8px 0" : "8px 16px", borderTop: `1px solid ${token.colorBorderSecondary}`, display: "flex", alignItems: "center", gap: 8, justifyContent: collapsed ? "center" : "flex-start" }}>
+              <Avatar size={22} icon={<UserOutlined />} style={{ background: token.colorPrimary, flexShrink: 0, fontSize: 11 }}>{(auth.user?.username ?? "U")[0].toUpperCase()}</Avatar>
               {!collapsed && (
                 <>
                   <Text type="secondary" ellipsis style={{ fontSize: 12, flex: 1, lineHeight: "22px" }}>{auth.user?.username ?? "用户"}</Text>
-                  <Button type="text" icon={<LogoutOutlined />} onClick={() => void auth.logout()} size="small" style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }} />
+                  <Button type="text" icon={<LogoutOutlined />} onClick={() => void auth.logout()} size="small" style={{ color: token.colorTextTertiary, flexShrink: 0 }} />
                 </>
               )}
             </div>
@@ -194,7 +202,7 @@ export function AppShell() {
       </Sider>
 
       <Layout style={{ marginLeft: siderWidth, transition: "margin-left 0.2s" }}>
-        <Header style={{ padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "flex-end", borderBottom: "1px solid #303030", height: 48, lineHeight: "48px" }}>
+        <Header style={{ padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "flex-end", borderBottom: `1px solid ${token.colorBorder}`, height: 48, lineHeight: "48px" }}>
           <Space size={12} align="center">
             <Button
               type="text"
@@ -208,7 +216,7 @@ export function AppShell() {
                 <Button type="text" icon={<BellOutlined style={{ fontSize: 16 }} />} style={{ display: "flex", alignItems: "center", justifyContent: "center" }} />
               </Badge>
             </Dropdown>
-            <Avatar size={28} style={{ background: "#1668dc", fontSize: 12, cursor: "default" }}>{(auth.user?.username ?? "U")[0].toUpperCase()}</Avatar>
+            <Avatar size={28} style={{ background: token.colorPrimary, fontSize: 12, cursor: "default" }}>{(auth.user?.username ?? "U")[0].toUpperCase()}</Avatar>
           </Space>
         </Header>
         <Content style={{ padding: 24, minHeight: "calc(100vh - 48px)", overflow: "auto" }}>

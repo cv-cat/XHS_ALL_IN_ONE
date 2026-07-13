@@ -61,7 +61,7 @@ export function XhsDashboard() {
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         {metrics.map((metric) => (
           <Col xs={12} sm={12} md={6} key={metric.label}>
-            <Card size="small" style={{ background: "#1f1f1f", borderColor: "#303030" }}>
+            <Card size="small">
               <Statistic
                 title={metric.label}
                 value={metric.value}
@@ -77,7 +77,6 @@ export function XhsDashboard() {
           <Card
             title="高潜话题"
             extra={<Link to="/platforms/xhs/analytics">查看洞察</Link>}
-            style={{ background: "#1f1f1f", borderColor: "#303030" }}
           >
             {overview.hot_topics.length === 0 ? (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无话题数据" />
@@ -102,7 +101,6 @@ export function XhsDashboard() {
           <Card
             title="自动化结果"
             extra={<RobotOutlined />}
-            style={{ background: "#1f1f1f", borderColor: "#303030" }}
           >
             {overview.recent_activity.length === 0 ? (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无最近活动" />

@@ -11,6 +11,7 @@ import {
   Button,
   Card,
   Col,
+  ConfigProvider,
   Form,
   Input,
   Row,
@@ -18,6 +19,7 @@ import {
   Space,
   Statistic,
   Typography,
+  theme as antdTheme,
 } from "antd";
 import { type FormEvent, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -97,23 +99,43 @@ export function LoginPage() {
   }
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#0a0a0a",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 24,
+    <ConfigProvider
+      theme={{
+        algorithm: antdTheme.darkAlgorithm,
+        token: {
+          colorBgBase: "#0a0a0a",
+          colorBgContainer: "#1a1a1a",
+          colorBorder: "#303030",
+          colorPrimary: "#1668dc",
+          borderRadius: 8,
+        },
+        components: {
+          Segmented: {
+            itemColor: "rgba(255, 255, 255, 0.65)",
+            itemSelectedBg: "#303030",
+            itemSelectedColor: "#ffffff",
+            trackBg: "#0a0a0a",
+          },
+        },
       }}
     >
-      <Row
-        gutter={48}
-        align="middle"
-        style={{ maxWidth: 960, width: "100%" }}
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "#0a0a0a",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 24,
+        }}
       >
-        {/* Left side: marketing copy */}
-        <Col xs={24} md={12}>
+        <Row
+          gutter={48}
+          align="middle"
+          style={{ maxWidth: 960, width: "100%" }}
+        >
+          {/* Left side: marketing copy */}
+          <Col xs={24} md={12}>
           <Space align="center" size={12} style={{ marginBottom: 32 }}>
             <div
               style={{
@@ -207,10 +229,10 @@ export function LoginPage() {
               />
             </Col>
           </Row>
-        </Col>
+          </Col>
 
-        {/* Right side: login form */}
-        <Col xs={24} md={12}>
+          {/* Right side: login form */}
+          <Col xs={24} md={12}>
           <Card
             style={{
               background: "#1a1a1a",
@@ -326,8 +348,9 @@ export function LoginPage() {
                 : "注册后会自动进入平台选择页。"}
             </Text>
           </Card>
-        </Col>
-      </Row>
-    </div>
+          </Col>
+        </Row>
+      </div>
+    </ConfigProvider>
   );
 }

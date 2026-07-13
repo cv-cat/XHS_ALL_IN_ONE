@@ -13,7 +13,7 @@ import {
   SearchOutlined,
   StarOutlined,
 } from "@ant-design/icons";
-import { Alert, Badge, Button, Card, Col, Descriptions, Drawer, Empty, Input, Row, Select, Space, Spin, Tag, Typography } from "antd";
+import { Alert, Badge, Button, Card, Col, Descriptions, Drawer, Empty, Input, Row, Select, Space, Spin, Tag, theme, Typography } from "antd";
 import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -71,6 +71,7 @@ function getNoteKindLabel(note: XhsSearchNote): "视频" | "图文" {
 function stopCardClick(e: MouseEvent<HTMLElement>) { e.stopPropagation(); }
 
 export function XhsDiscoveryPage() {
+  const { token } = theme.useToken();
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [keyword, setKeyword] = useState("");
@@ -233,15 +234,15 @@ export function XhsDiscoveryPage() {
                   <Col xs={12} sm={8} md={6} lg={4} xl={4} key={`${note.note_id}-${note.title}`}>
                     <Card hoverable size="small" style={{ overflow: "hidden" }} onClick={() => void openDetail(note)}
                       cover={
-                        <div style={{ position: "relative", background: "#262626" }}>
+                        <div style={{ position: "relative", background: token.colorFillSecondary }}>
                           {coverUrl
                             ? <img src={coverUrl} alt={note.title || "封面"} referrerPolicy="no-referrer" style={{ width: "100%", aspectRatio: "1/1", objectFit: "cover", display: "block" }} />
-                            : <div style={{ width: "100%", aspectRatio: "1/1", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,.2)", fontSize: 28 }}><PictureOutlined /></div>}
+                            : <div style={{ width: "100%", aspectRatio: "1/1", display: "flex", alignItems: "center", justifyContent: "center", color: token.colorTextQuaternary, fontSize: 28 }}><PictureOutlined /></div>}
                           <Tag color={kind === "视频" ? "purple" : "blue"} style={{ position: "absolute", top: 8, left: 8 }} icon={kind === "视频" ? <PlayCircleOutlined /> : <PictureOutlined />}>{kind}</Tag>
                         </div>
                       }>
                       <Card.Meta title={<Text ellipsis style={{ fontSize: 13 }}>{note.title || "未命名笔记"}</Text>} description={<><Text type="secondary" style={{ fontSize: 12 }}>{note.author_name || "未知作者"}</Text>{formatNoteTime(note) && <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>{formatNoteTime(note)}</Text>}</>} />
-                      <Space size={12} style={{ marginTop: 8, fontSize: 12, color: "rgba(255,255,255,.45)" }}>
+                      <Space size={12} style={{ marginTop: 8, fontSize: 12, color: token.colorTextSecondary }}>
                         <span><HeartOutlined /> {formatMetric(note.likes)}</span>
                         <span><StarOutlined /> {formatMetric(note.collects)}</span>
                         <span><CommentOutlined /> {formatMetric(note.comments)}</span>
@@ -257,16 +258,16 @@ export function XhsDiscoveryPage() {
                       </div>
                       {commentPreviewErrors[note.note_id] && <Alert message={commentPreviewErrors[note.note_id]} type="error" style={{ marginTop: 8, fontSize: 12 }} showIcon />}
                       {commentPreviewByNoteId[note.note_id] && (
-                        <div style={{ marginTop: 8, borderTop: "1px solid #303030", paddingTop: 8 }} onClick={stopCardClick}>
+                        <div style={{ marginTop: 8, borderTop: `1px solid ${token.colorBorderSecondary}`, paddingTop: 8 }} onClick={stopCardClick}>
                           {commentPreviewByNoteId[note.note_id].length === 0 ? <Text type="secondary" style={{ fontSize: 12 }}>暂无评论</Text> : null}
                           {commentPreviewByNoteId[note.note_id].filter((c) => !c.parent_comment_id).slice(0, 4).map((c) => (
                             <div key={c.comment_id} style={{ marginBottom: 6, fontSize: 12 }}>
                               <Text strong style={{ fontSize: 12 }}>{c.user_name}</Text> <Text type="secondary" style={{ fontSize: 11 }}>{c.created_at_remote} · {c.like_count} likes</Text>
-                              <div style={{ color: "rgba(255,255,255,.65)" }}>{c.content}</div>
+                              <Text style={{ display: "block" }}>{c.content}</Text>
                               {getChildComments(note.note_id, c.comment_id).map((r) => (
                                 <div key={r.comment_id} style={{ marginLeft: 16, marginTop: 4 }}>
                                   <Text strong style={{ fontSize: 11 }}>{r.user_name}</Text> <Text type="secondary" style={{ fontSize: 11 }}>{r.like_count} likes</Text>
-                                  <div style={{ color: "rgba(255,255,255,.55)", fontSize: 12 }}>{r.content}</div>
+                                  <Text style={{ display: "block", fontSize: 12 }}>{r.content}</Text>
                                 </div>
                               ))}
                             </div>
@@ -285,22 +286,22 @@ export function XhsDiscoveryPage() {
         )}
       </Card>
 
-      <Drawer title={selectedNote?.title || "笔记详情"} open={!!selectedNote} onClose={closeDetail} width={640} styles={{ body: { background: "#1a1a1a" } }}>
+      <Drawer title={selectedNote?.title || "笔记详情"} open={!!selectedNote} onClose={closeDetail} width={640}>
         {selectedNote && (
           <div>
             {isFetchingDetail && <Spin style={{ display: "block", textAlign: "center", margin: "16px 0" }} />}
             {detailError && <Alert message={detailError} type="warning" showIcon style={{ marginBottom: 12 }} />}
             {selVideoUrl && getNoteKindLabel(selectedNote) === "视频" ? (
               <div style={{ marginBottom: 16 }}>
-                <div style={{ position: "relative", background: "#262626", borderRadius: 8, overflow: "hidden" }}>
-                  {selImgUrls.length ? <img src={selImgUrls[0]} alt="视频封面" referrerPolicy="no-referrer" style={{ width: "100%", maxHeight: 400, objectFit: "contain", display: "block" }} /> : <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center" }}><PlayCircleOutlined style={{ fontSize: 40, color: "rgba(255,255,255,.3)" }} /></div>}
+                <div style={{ position: "relative", background: token.colorFillSecondary, borderRadius: 8, overflow: "hidden" }}>
+                  {selImgUrls.length ? <img src={selImgUrls[0]} alt="视频封面" referrerPolicy="no-referrer" style={{ width: "100%", maxHeight: 400, objectFit: "contain", display: "block" }} /> : <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center" }}><PlayCircleOutlined style={{ fontSize: 40, color: token.colorTextQuaternary }} /></div>}
                   <Tag color="purple" style={{ position: "absolute", top: 8, left: 8 }}><PlayCircleOutlined /> 视频封面</Tag>
                 </div>
                 <Button type="primary" icon={<LinkOutlined />} href={selVideoUrl} target="_blank" rel="noreferrer" style={{ marginTop: 8 }} block>打开视频</Button>
               </div>
             ) : selImgUrls.length ? (
               <div style={{ marginBottom: 16 }}>
-                <div style={{ position: "relative", background: "#262626", borderRadius: 8, overflow: "hidden", textAlign: "center" }}>
+                <div style={{ position: "relative", background: token.colorFillSecondary, borderRadius: 8, overflow: "hidden", textAlign: "center" }}>
                   <img src={selImgUrls[selMediaIdx]} alt="笔记图片" referrerPolicy="no-referrer" style={{ maxWidth: "100%", maxHeight: 400, objectFit: "contain" }} />
                   {selImgUrls.length > 1 && (
                     <>
@@ -313,7 +314,7 @@ export function XhsDiscoveryPage() {
                 {selImgUrls.length > 1 && (
                   <Space size={4} style={{ marginTop: 8, overflowX: "auto" }}>
                     {selImgUrls.map((url, i) => (
-                      <div key={url} onClick={() => setDetailMediaIndex(i)} style={{ width: 48, height: 48, borderRadius: 4, overflow: "hidden", cursor: "pointer", border: i === selMediaIdx ? "2px solid #1668dc" : "2px solid transparent", flexShrink: 0 }}>
+                      <div key={url} onClick={() => setDetailMediaIndex(i)} style={{ width: 48, height: 48, borderRadius: 4, overflow: "hidden", cursor: "pointer", border: i === selMediaIdx ? `2px solid ${token.colorPrimary}` : "2px solid transparent", flexShrink: 0 }}>
                         <img src={url} alt="" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                       </div>
                     ))}
@@ -334,7 +335,7 @@ export function XhsDiscoveryPage() {
 
             <div style={{ marginBottom: 16 }}>
               <Text strong>正文</Text>
-              <Paragraph style={{ marginTop: 4, color: "rgba(255,255,255,.65)" }}>{selectedNote.content || "暂无正文。"}</Paragraph>
+              <Paragraph style={{ marginTop: 4 }}>{selectedNote.content || "暂无正文。"}</Paragraph>
             </div>
 
             <Space wrap style={{ marginBottom: 16 }}>
@@ -350,16 +351,16 @@ export function XhsDiscoveryPage() {
 
             {commentPreviewErrors[selectedNote.note_id] && <Alert message={commentPreviewErrors[selectedNote.note_id]} type="error" showIcon style={{ marginBottom: 12 }} />}
             {commentPreviewByNoteId[selectedNote.note_id] && (
-              <Card size="small" title="评论预览" style={{ background: "#1f1f1f" }}>
+              <Card size="small" title="评论预览">
                 {commentPreviewByNoteId[selectedNote.note_id].length === 0 ? <Text type="secondary">暂无评论</Text> : null}
                 {commentPreviewByNoteId[selectedNote.note_id].filter((c) => !c.parent_comment_id).map((c) => (
-                  <div key={c.comment_id} style={{ marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid #303030" }}>
+                  <div key={c.comment_id} style={{ marginBottom: 12, paddingBottom: 8, borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
                     <Space><Text strong style={{ fontSize: 13 }}>{c.user_name}</Text><Text type="secondary" style={{ fontSize: 11 }}>{c.created_at_remote} · {c.like_count} likes</Text></Space>
-                    <div style={{ color: "rgba(255,255,255,.65)", fontSize: 13, marginTop: 2 }}>{c.content}</div>
+                    <Text style={{ display: "block", fontSize: 13, marginTop: 2 }}>{c.content}</Text>
                     {getChildComments(selectedNote.note_id, c.comment_id).map((r) => (
-                      <div key={r.comment_id} style={{ marginLeft: 20, marginTop: 6, paddingLeft: 8, borderLeft: "2px solid #303030" }}>
+                      <div key={r.comment_id} style={{ marginLeft: 20, marginTop: 6, paddingLeft: 8, borderLeft: `2px solid ${token.colorBorderSecondary}` }}>
                         <Space><Text strong style={{ fontSize: 12 }}>{r.user_name}</Text><Text type="secondary" style={{ fontSize: 11 }}>{r.like_count} likes</Text></Space>
-                        <div style={{ color: "rgba(255,255,255,.55)", fontSize: 12 }}>{r.content}</div>
+                        <Text style={{ display: "block", fontSize: 12 }}>{r.content}</Text>
                       </div>
                     ))}
                   </div>

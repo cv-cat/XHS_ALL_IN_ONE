@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined } from "@ant-design/icons";
-import { Button, Result, Typography } from "antd";
+import { Button, Result, Typography, theme } from "antd";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { getPlatform } from "../../lib/platforms";
@@ -10,6 +10,7 @@ export function ComingSoonPage() {
   const { platformId } = useParams();
   const platform = getPlatform(platformId);
   const navigate = useNavigate();
+  const { token } = theme.useToken();
 
   return (
     <div
@@ -18,7 +19,7 @@ export function ComingSoonPage() {
         alignItems: "center",
         justifyContent: "center",
         minHeight: "100vh",
-        background: "#0a0a0a",
+        background: token.colorBgLayout,
       }}
     >
       <Result

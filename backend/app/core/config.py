@@ -118,6 +118,23 @@ class Settings(BaseSettings):
     if hasattr(BaseSettings, "model_config"):
         model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+        @classmethod
+        def settings_customise_sources(
+            cls,
+            settings_cls,
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+        ):
+            return (
+                init_settings,
+                env_settings,
+                dotenv_settings,
+                _load_yaml_config,
+                file_secret_settings,
+            )
+
     def model_post_init(self, __context: Any) -> None:
         # Build database_url from component fields if not explicitly set
         if not self.database_url:
@@ -153,5 +170,6 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    yaml_values = _load_yaml_config()
-    return Settings(**yaml_values)
+    if hasattr(BaseSettings, "model_config"):
+        return Settings()
+    return Settings(**_load_yaml_config())

@@ -62,7 +62,14 @@ def _run_alembic_migrations() -> None:
         has_alembic = "alembic_version" in inspector.get_table_names()
 
         if has_tables and not has_alembic:
-            command.stamp(alembic_cfg, "head")
+            user_columns = {
+                column["name"] for column in inspector.get_columns("users")
+            } if "users" in inspector.get_table_names() else set()
+            if {"is_admin", "is_active"}.issubset(user_columns):
+                command.stamp(alembic_cfg, "head")
+            else:
+                command.stamp(alembic_cfg, "60cd5c95fde1")
+                command.upgrade(alembic_cfg, "head")
         else:
             command.upgrade(alembic_cfg, "head")
     except ImportError:

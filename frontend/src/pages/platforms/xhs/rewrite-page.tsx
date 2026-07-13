@@ -45,6 +45,7 @@ import {
   Spin,
   Tabs,
   Tag,
+  theme,
   Typography,
   Upload,
 } from "antd";
@@ -193,6 +194,7 @@ function SortableRewriteImage({ asset, onEdit, onRemove, onView }: { asset: Draf
 }
 
 export function XhsDraftsPage() {
+  const { token } = theme.useToken();
   const [activeMode, setActiveMode] = useState<AiContentMode>("rewrite");
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [selectedDraftId, setSelectedDraftId] = useState<number | null>(null);
@@ -743,9 +745,9 @@ export function XhsDraftsPage() {
                         <div
                           onClick={() => setUploadModalOpen(true)}
                           style={{
-                            width: 60, height: 60, borderRadius: 4, border: "1px dashed #434343",
+                            width: 60, height: 60, borderRadius: 4, border: `1px dashed ${token.colorBorder}`,
                             display: "flex", alignItems: "center", justifyContent: "center",
-                            cursor: "pointer", background: "rgba(255,255,255,0.04)",
+                            cursor: "pointer", background: token.colorFillQuaternary,
                           }}
                         >
                           <PlusOutlined style={{ fontSize: 20, color: "#8c8c8c" }} />
@@ -913,8 +915,8 @@ export function XhsDraftsPage() {
             </div>
 
             {rewritePreview !== null && (
-              <Card size="small" title="改写结果" style={{ marginBottom: 16, background: "#1a2332", borderColor: "#1668dc40" }}>
-                <Paragraph style={{ whiteSpace: "pre-wrap", color: "rgba(255,255,255,.75)", fontSize: 13, maxHeight: 240, overflow: "auto" }}>{rewritePreview}</Paragraph>
+              <Card size="small" title="改写结果" style={{ marginBottom: 16, background: token.colorPrimaryBg, borderColor: token.colorPrimaryBorder }}>
+                <Paragraph style={{ whiteSpace: "pre-wrap", color: token.colorText, fontSize: 13, maxHeight: 240, overflow: "auto" }}>{rewritePreview}</Paragraph>
                 <Space style={{ marginTop: 8 }}>
                   <Button type="primary" size="small" onClick={applyRewrite}>采用</Button>
                   <Button size="small" onClick={discardRewrite}>放弃</Button>
@@ -1019,7 +1021,7 @@ export function XhsDraftsPage() {
               <div>
                 <Row gutter={16} style={{ marginBottom: 16 }}>
                   <Col span={12}>
-                    <div style={{ padding: 8, background: "rgba(255,255,255,0.04)", borderRadius: 8, textAlign: "center" }}>
+                    <div style={{ padding: 8, background: token.colorFillQuaternary, borderRadius: 8, textAlign: "center" }}>
                       <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>当前素材</Text>
                       {isImage ? (
                         <Image
@@ -1038,7 +1040,7 @@ export function XhsDraftsPage() {
                     </div>
                   </Col>
                   <Col span={12}>
-                    <div style={{ padding: 8, background: "rgba(255,255,255,0.04)", borderRadius: 8, textAlign: "center" }}>
+                    <div style={{ padding: 8, background: token.colorFillQuaternary, borderRadius: 8, textAlign: "center" }}>
                       <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>优化后预览</Text>
                       {optimizeResult ? (
                         <Image
@@ -1050,7 +1052,7 @@ export function XhsDraftsPage() {
                           preview={{ mask: <EyeOutlined style={{ fontSize: 16 }} /> }}
                         />
                       ) : (
-                        <div style={{ width: 180, height: 180, margin: "0 auto", border: "1px dashed #434343", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <div style={{ width: 180, height: 180, margin: "0 auto", border: `1px dashed ${token.colorBorder}`, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center" }}>
                           <Text type="secondary" style={{ fontSize: 12 }}>{isOptimizing ? "生成中..." : "等待生成"}</Text>
                         </div>
                       )}
@@ -1064,7 +1066,7 @@ export function XhsDraftsPage() {
                       <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>额外参考图（可选）</Text>
                       <Space size={8} wrap>
                         {optimizeRefImages.map((url, idx) => (
-                          <div key={idx} style={{ position: "relative", width: 40, height: 40, borderRadius: 4, overflow: "hidden", border: "1px solid #333" }}>
+                          <div key={idx} style={{ position: "relative", width: 40, height: 40, borderRadius: 4, overflow: "hidden", border: `1px solid ${token.colorBorder}` }}>
                             <img src={url} style={{ width: "100%", height: "100%", objectFit: "cover" }} referrerPolicy="no-referrer" />
                             <Button type="text" danger size="small" icon={<DeleteOutlined />}
                               onClick={() => setOptimizeRefImages((prev) => prev.filter((_, i) => i !== idx))}
@@ -1075,7 +1077,7 @@ export function XhsDraftsPage() {
                         <div
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => setRefPickerOpen(true)}
-                          style={{ width: 40, height: 40, borderRadius: 4, border: "1px dashed #434343", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", background: "rgba(255,255,255,0.04)" }}
+                          style={{ width: 40, height: 40, borderRadius: 4, border: `1px dashed ${token.colorBorder}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", background: token.colorFillQuaternary }}
                         >
                           <PlusOutlined style={{ fontSize: 14, color: "#8c8c8c" }} />
                         </div>

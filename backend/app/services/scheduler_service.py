@@ -229,6 +229,7 @@ def run_due_publish_jobs_for_all_users(
         .join(PlatformAccount, PlatformAccount.user_id == User.id)
         .join(PublishJob, PublishJob.platform_account_id == PlatformAccount.id)
         .where(
+            User.is_active.is_(True),
             PublishJob.platform == platform,
             PublishJob.publish_mode == "scheduled",
             PublishJob.status == "pending",
@@ -386,7 +387,9 @@ def run_monitoring_refresh_for_all_users(*, db: Session, now: Optional[datetime]
     now = now or shanghai_now()
     targets = db.scalars(
         select(MonitoringTarget)
+        .join(User, User.id == MonitoringTarget.user_id)
         .where(
+            User.is_active.is_(True),
             MonitoringTarget.platform == platform,
             MonitoringTarget.status == "active",
         )
@@ -608,7 +611,8 @@ def run_due_auto_tasks() -> None:
     try:
         now = shanghai_now()
         due_tasks = db.scalars(
-            select(AutoTask).where(
+            select(AutoTask).join(User, User.id == AutoTask.user_id).where(
+                User.is_active.is_(True),
                 AutoTask.status == "active",
                 AutoTask.schedule_type != "manual",
                 AutoTask.next_run_at != None,  # noqa: E711
@@ -671,7 +675,12 @@ def check_all_account_cookies_once() -> None:
     db = SessionLocal()
     try:
         now = shanghai_now()
-        accounts = db.scalars(select(PlatformAccount).order_by(PlatformAccount.id.asc())).all()
+        accounts = db.scalars(
+            select(PlatformAccount)
+            .join(User, User.id == PlatformAccount.user_id)
+            .where(User.is_active.is_(True))
+            .order_by(PlatformAccount.id.asc())
+        ).all()
         checked = 0
         newly_expired = 0
         for account in accounts:

@@ -19,6 +19,7 @@ import {
   Statistic,
   Table,
   Tag,
+  theme,
   Typography,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -69,6 +70,7 @@ function statusColor(status: string): string {
 }
 
 export function TaskCenterPage() {
+  const { token } = theme.useToken();
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isActionLoading, setIsActionLoading] = useState(false);
@@ -211,8 +213,6 @@ export function TaskCenterPage() {
     },
   ];
 
-  const cardStyle = { background: "#1f1f1f", borderColor: "#303030" };
-
   return (
     <div>
       <PageHeader
@@ -278,7 +278,7 @@ export function TaskCenterPage() {
               </Tag>
             </Space>
           }
-          style={{ ...cardStyle, marginBottom: 24 }}
+          style={{ marginBottom: 24 }}
         >
           <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
             <Col xs={12} sm={6}>
@@ -331,14 +331,18 @@ export function TaskCenterPage() {
         </Card>
       )}
 
-      <Card style={cardStyle}>
+      <Card>
         {isLoading ? (
           <div style={{ textAlign: "center", padding: 48 }}>
             <Spin tip="正在加载任务..." />
           </div>
         ) : tasks.length === 0 ? (
           <Empty
-            image={<ClockCircleOutlined style={{ fontSize: 48, color: "#555" }} />}
+            image={
+              <ClockCircleOutlined
+                style={{ fontSize: 48, color: token.colorTextSecondary }}
+              />
+            }
             description={
               <div>
                 <Text strong>暂无任务记录</Text>

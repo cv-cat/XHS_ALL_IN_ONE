@@ -33,6 +33,8 @@ export type DashboardOverview = {
 export type PlatformUser = {
   id: number;
   username: string;
+  is_admin: boolean;
+  is_active: boolean;
 };
 
 export type AuthTokens = {
@@ -714,4 +716,124 @@ export type AppNotification = {
   source_id?: number | null;
   read: boolean;
   created_at: string;
+};
+
+// Admin API contracts. Collection endpoints return Paginated<T>; overview and
+// system-health return the aggregate objects below directly.
+export type AdminContentCounts = {
+  total: number;
+  notes: number;
+  drafts: number;
+  generated_assets: number;
+  publish_jobs: number;
+};
+
+export type AdminOverview = {
+  generated_at: string;
+  users: { total: number; active: number; new_today?: number; admins: number };
+  platform_accounts: { total: number; healthy: number; at_risk: number };
+  content: AdminContentCounts;
+  tasks: { running: number; queued: number; failed_today: number };
+  publishes: { pending: number; published_today: number; failed_today: number };
+  models: { total: number; configured: number };
+  recent_activity?: AdminAuditEvent[];
+};
+
+export type AdminAuditEvent = {
+  id: string;
+  event_type: string;
+  actor: string;
+  summary: string;
+  level: "info" | "warning" | "error" | string;
+  created_at: string;
+};
+
+export type AdminUser = PlatformUser & {
+  is_active: boolean;
+  platform_account_count: number;
+  content_count: number;
+  created_at: string;
+  last_login_at?: string | null;
+};
+
+export type AdminPlatformAccount = {
+  id: number;
+  user_id?: number;
+  username: string;
+  platform: string;
+  sub_type?: string | null;
+  nickname: string;
+  status: string;
+  status_message?: string | null;
+  external_user_id?: string | null;
+  avatar_url?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdminContent = {
+  id: number;
+  resource_key: string;
+  user_id: number;
+  username: string;
+  platform?: string | null;
+  content_type: string;
+  title?: string | null;
+  status?: string | null;
+  created_at: string;
+};
+
+export type AdminContentSummary = AdminContentCounts & {
+  publish_statuses: Record<string, number>;
+};
+
+export type AdminTask = {
+  id: number;
+  user_id: number;
+  username: string;
+  platform: string;
+  task_type: string;
+  title: string;
+  status: string;
+  progress?: number | null;
+  result_message?: string | null;
+  publish_status?: string | null;
+  error_type?: string | null;
+  retry_count: number;
+  max_retries: number;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  updated_at: string;
+};
+
+export type AdminModelConfig = {
+  id: number;
+  user_id: number;
+  username: string;
+  name: string;
+  model_type: string;
+  provider: string;
+  model_name: string;
+  base_url: string;
+  has_api_key: boolean;
+  is_default: boolean;
+  status: string;
+};
+
+export type AdminServiceHealth = {
+  name: string;
+  status: "healthy" | "degraded" | "down" | string;
+  latency_ms?: number | null;
+  message?: string | null;
+};
+
+export type AdminSystemHealth = {
+  status: "healthy" | "degraded" | "down" | string;
+  checked_at: string;
+  version: string;
+  uptime_seconds: number;
+  database: { status: string; latency_ms?: number | null; message?: string | null };
+  queue: { status: string; pending: number; running: number; failed: number };
+  services: AdminServiceHealth[];
 };

@@ -39,6 +39,7 @@ import {
   Statistic,
   Table,
   Tag,
+  theme,
   Typography,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -165,6 +166,7 @@ function getSavedNoteCoverUrl(note: SavedNote): string { return note.cover_url |
 
 export function XhsLibraryPage() {
   const navigate = useNavigate();
+  const { token } = theme.useToken();
   const [notes, setNotes] = useState<SavedNote[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -411,9 +413,9 @@ export function XhsLibraryPage() {
               <Col xs={12} sm={8} md={6} lg={4} xl={4} key={note.id}>
                 <Card hoverable size="small" style={{ overflow: "hidden" }} onClick={() => void openDetail(note)}
                   cover={
-                    <div style={{ position: "relative", background: "#262626" }}>
+                    <div style={{ position: "relative", background: token.colorFillSecondary }}>
                       <Checkbox checked={selectedNoteIdSet.has(note.id)} onClick={(e) => { e.stopPropagation(); toggleNoteSelection(note.id); }} style={{ position: "absolute", top: 8, left: 8, zIndex: 2 }} />
-                      {cover ? <img src={cover} alt={note.title} referrerPolicy="no-referrer" style={{ width: "100%", aspectRatio: "1/1", objectFit: "cover", display: "block" }} /> : <div style={{ width: "100%", aspectRatio: "1/1", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,.2)", fontSize: 28 }}><PictureOutlined /></div>}
+                      {cover ? <img src={cover} alt={note.title} referrerPolicy="no-referrer" style={{ width: "100%", aspectRatio: "1/1", objectFit: "cover", display: "block" }} /> : <div style={{ width: "100%", aspectRatio: "1/1", display: "flex", alignItems: "center", justifyContent: "center", color: token.colorTextQuaternary, fontSize: 28 }}><PictureOutlined /></div>}
                       <Tag color={kind.includes("video") ? "purple" : "blue"} style={{ position: "absolute", top: 8, right: 8 }} icon={kind.includes("video") ? <PlayCircleOutlined /> : <PictureOutlined />}>{kind.includes("video") ? "视频" : "图文"}</Tag>
                     </div>
                   }>
@@ -427,7 +429,7 @@ export function XhsLibraryPage() {
                         const eng = getNoteEngagement(note);
                         if (!eng.likes && !eng.collects && !eng.comments && !eng.shares) return null;
                         return (
-                          <div style={{ marginTop: 4, display: "flex", gap: 8, fontSize: 11, color: "rgba(255,255,255,.45)" }}>
+                          <div style={{ marginTop: 4, display: "flex", gap: 8, fontSize: 11, color: token.colorTextSecondary }}>
                             {eng.likes > 0 && <span><HeartOutlined /> {eng.likes}</span>}
                             {eng.collects > 0 && <span><StarOutlined /> {eng.collects}</span>}
                             {eng.comments > 0 && <span><MessageOutlined /> {eng.comments}</span>}
@@ -445,7 +447,7 @@ export function XhsLibraryPage() {
         </Row>
       )}
 
-      <Drawer title={selectedNote?.title || "笔记详情"} open={isDetailOpen} onClose={closeDetail} width={640} styles={{ body: { background: "#1a1a1a" } }}>
+      <Drawer title={selectedNote?.title || "笔记详情"} open={isDetailOpen} onClose={closeDetail} width={640}>
         {selectedNote && (
           <Spin spinning={isDetailLoading}>
             {detailError && <Alert message={detailError} type="warning" showIcon style={{ marginBottom: 12 }} />}
@@ -480,7 +482,7 @@ export function XhsLibraryPage() {
                   <Space size={8} wrap>
                     {selectedAssets.map((a) => (
                       a.asset_type === "video" ? (
-                        <div key={a.id} style={{ width: 80, height: 80, background: "#262626", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <div key={a.id} style={{ width: 80, height: 80, background: token.colorFillSecondary, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center" }}>
                           <Button type="link" icon={<PlayCircleOutlined />} href={a.url} target="_blank" rel="noreferrer">视频</Button>
                         </div>
                       ) : <Image key={a.id} src={a.url} width={80} height={80} style={{ objectFit: "cover", borderRadius: 6 }} referrerPolicy="no-referrer" />
@@ -492,23 +494,23 @@ export function XhsLibraryPage() {
 
             <div style={{ marginBottom: 16 }}>
               <Text strong>正文</Text>
-              <Paragraph style={{ marginTop: 4, color: "rgba(255,255,255,.65)", whiteSpace: "pre-wrap" }}>{selectedNote.content || "暂无正文。"}</Paragraph>
+              <Paragraph style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>{selectedNote.content || "暂无正文。"}</Paragraph>
             </div>
 
             <Button onClick={toggleComments} style={{ marginBottom: 8 }}>{isCommentsOpen ? "收起评论" : `查看评论 (${commentsTotal})`}</Button>
             {isCommentsOpen && (
-              <Card size="small" style={{ background: "#1f1f1f" }}>
+              <Card size="small">
                 {commentsError && <Alert message={commentsError} type="error" showIcon style={{ marginBottom: 8 }} />}
                 {isCommentsLoading && <Spin size="small" />}
                 {topLevelComments.length === 0 && !isCommentsLoading ? <Text type="secondary">暂无评论</Text> : null}
                 {topLevelComments.map((c) => (
-                  <div key={c.comment_id} style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid #303030" }}>
+                  <div key={c.comment_id} style={{ marginBottom: 10, paddingBottom: 8, borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
                     <Space><Text strong style={{ fontSize: 13 }}>{c.user_name}</Text><Text type="secondary" style={{ fontSize: 11 }}>{c.created_at_remote} · {c.like_count} likes</Text></Space>
-                    <div style={{ color: "rgba(255,255,255,.65)", fontSize: 13, marginTop: 2 }}>{c.content}</div>
+                    <Text style={{ display: "block", fontSize: 13, marginTop: 2 }}>{c.content}</Text>
                     {childComments(c.comment_id).map((r) => (
-                      <div key={r.comment_id} style={{ marginLeft: 20, marginTop: 4, paddingLeft: 8, borderLeft: "2px solid #303030" }}>
+                      <div key={r.comment_id} style={{ marginLeft: 20, marginTop: 4, paddingLeft: 8, borderLeft: `2px solid ${token.colorBorderSecondary}` }}>
                         <Space><Text strong style={{ fontSize: 12 }}>{r.user_name}</Text><Text type="secondary" style={{ fontSize: 11 }}>{r.like_count} likes</Text></Space>
-                        <div style={{ color: "rgba(255,255,255,.55)", fontSize: 12 }}>{r.content}</div>
+                        <Text style={{ display: "block", fontSize: 12 }}>{r.content}</Text>
                       </div>
                     ))}
                   </div>
@@ -519,8 +521,8 @@ export function XhsLibraryPage() {
 
             {selectedNote.raw_json && (
               <details style={{ marginTop: 16 }}>
-                <summary style={{ cursor: "pointer", color: "rgba(255,255,255,.45)", fontSize: 12 }}>原始 JSON</summary>
-                <pre style={{ fontSize: 11, color: "rgba(255,255,255,.5)", background: "#1f1f1f", padding: 8, borderRadius: 6, overflow: "auto", maxHeight: 300 }}>{JSON.stringify(selectedNote.raw_json, null, 2)}</pre>
+                <summary style={{ cursor: "pointer", color: token.colorTextSecondary, fontSize: 12 }}>原始 JSON</summary>
+                <pre style={{ fontSize: 11, color: token.colorText, background: token.colorFillTertiary, padding: 8, borderRadius: 6, overflow: "auto", maxHeight: 300 }}>{JSON.stringify(selectedNote.raw_json, null, 2)}</pre>
               </details>
             )}
           </Spin>

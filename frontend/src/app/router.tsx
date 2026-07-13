@@ -1,8 +1,10 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AppShell } from "../components/layout/app-shell";
+import { AdminShell } from "../components/layout/admin-shell";
 import { ComingSoonPage } from "../components/platforms/coming-soon";
-import { ProtectedRoute, PublicOnlyRoute } from "../components/ui/protected-route";
+import { AdminRoute, ProtectedRoute, PublicOnlyRoute } from "../components/ui/protected-route";
+import { AdminSectionPage } from "../pages/admin/admin-section-page";
 import { LoginPage } from "../pages/login/login-page";
 import { ModelConfigPage } from "../pages/models/model-config-page";
 import { PlatformSelectPage } from "../pages/platform-select/platform-select-page";
@@ -77,6 +79,17 @@ export function AppRouter() {
           <Route path="/tasks" element={<TaskCenterPage />} />
           <Route path="/models" element={<ModelConfigPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+        </Route>
+        <Route
+          path="/admin"
+          element={
+            <AdminRoute>
+              <AdminShell />
+            </AdminRoute>
+          }
+        >
+          <Route index element={<Navigate to="/admin/overview" replace />} />
+          <Route path=":section" element={<AdminSectionPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

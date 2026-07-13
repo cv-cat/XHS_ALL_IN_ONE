@@ -1,6 +1,7 @@
-import { LogoutOutlined } from "@ant-design/icons";
-import { Button, Space, Typography } from "antd";
+import { ControlOutlined, LogoutOutlined } from "@ant-design/icons";
+import { Button, Space, Typography, theme } from "antd";
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { PlatformSelector } from "../../components/layout/platform-selector";
 import { useAuth } from "../../hooks/use-auth";
@@ -12,6 +13,8 @@ const { Title, Text } = Typography;
 
 export function PlatformSelectPage() {
   const auth = useAuth();
+  const navigate = useNavigate();
+  const { token } = theme.useToken();
   const [platforms, setPlatforms] = useState<PlatformMeta[]>(fallbackPlatforms);
 
   useEffect(() => {
@@ -22,8 +25,8 @@ export function PlatformSelectPage() {
     <div
       style={{
         minHeight: "100vh",
-        background: "#0a0a0a",
-        padding: "48px 40px",
+        background: token.colorBgLayout,
+        padding: "clamp(24px, 6vw, 48px) clamp(16px, 5vw, 40px)",
       }}
     >
       <div
@@ -37,6 +40,8 @@ export function PlatformSelectPage() {
             display: "flex",
             justifyContent: "space-between",
             alignItems: "flex-start",
+            flexWrap: "wrap",
+            gap: 16,
             marginBottom: 40,
           }}
         >
@@ -60,12 +65,16 @@ export function PlatformSelectPage() {
               小红书已开放，其它平台保留扩展入口。
             </Text>
           </div>
-          <Button
-            icon={<LogoutOutlined />}
-            onClick={() => void auth.logout()}
-          >
-            退出登录
-          </Button>
+          <Space wrap>
+            {auth.user?.is_admin && (
+              <Button type="primary" icon={<ControlOutlined />} onClick={() => navigate("/admin/overview")}>
+                管理后台
+              </Button>
+            )}
+            <Button icon={<LogoutOutlined />} onClick={() => void auth.logout()}>
+              退出登录
+            </Button>
+          </Space>
         </div>
 
         <PlatformSelector platforms={platforms} />

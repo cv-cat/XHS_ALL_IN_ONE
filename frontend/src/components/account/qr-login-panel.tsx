@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Checkbox, Space, Typography } from "antd";
+import { Alert, Button, Card, Checkbox, Space, Typography, theme } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { useEffect, useRef, useState } from "react";
@@ -14,6 +14,7 @@ type QrLoginPanelProps = {
 };
 
 export function QrLoginPanel({ accountType, onConfirmed }: QrLoginPanelProps) {
+  const { token } = theme.useToken();
   const [session, setSession] = useState<XhsQrLoginSession | null>(null);
   const [statusText, setStatusText] = useState("准备生成二维码");
   const [isLoading, setIsLoading] = useState(false);
@@ -92,10 +93,10 @@ export function QrLoginPanel({ accountType, onConfirmed }: QrLoginPanelProps) {
             justifyContent: "center",
             padding: 24,
             minHeight: 220,
-            background: "#1f1f1f",
+            background: token.colorBgContainer,
           },
         }}
-        style={{ borderColor: "#303030" }}
+        style={{ borderColor: token.colorBorderSecondary }}
       >
         {session?.qr_image_data_url ? (
           <img
@@ -111,9 +112,9 @@ export function QrLoginPanel({ accountType, onConfirmed }: QrLoginPanelProps) {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              background: "#262626",
+              background: token.colorFillSecondary,
               borderRadius: 8,
-              color: "rgba(255,255,255,0.3)",
+              color: token.colorTextQuaternary,
               fontSize: 28,
               fontWeight: 700,
             }}
@@ -124,7 +125,7 @@ export function QrLoginPanel({ accountType, onConfirmed }: QrLoginPanelProps) {
       </Card>
 
       <div style={{ textAlign: "center" }}>
-        <Text strong style={{ display: "block", marginBottom: 4, color: "rgba(255,255,255,0.88)" }}>
+        <Text strong style={{ display: "block", marginBottom: 4, color: token.colorText }}>
           {statusText}
         </Text>
         {session?.qr_url ? (
@@ -138,7 +139,6 @@ export function QrLoginPanel({ accountType, onConfirmed }: QrLoginPanelProps) {
         <Checkbox
           checked={syncCreator}
           onChange={(event) => setSyncCreator(event.target.checked)}
-          style={{ color: "rgba(255,255,255,0.88)" }}
         >
           登录 PC 后同步 Creator 账号
         </Checkbox>

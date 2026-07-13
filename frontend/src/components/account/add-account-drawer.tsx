@@ -1,4 +1,4 @@
-import { Drawer, Segmented, message } from "antd";
+import { Drawer, Segmented, message, theme } from "antd";
 import { useState } from "react";
 
 import type { PlatformAccount } from "../../types";
@@ -27,6 +27,7 @@ const loginMethodOptions = [
 ];
 
 export function AddAccountDrawer({ open, onClose, onBound }: AddAccountDrawerProps) {
+  const { token } = theme.useToken();
   const [accountType, setAccountType] = useState<AccountType>("pc");
   const [method, setMethod] = useState<LoginMethod>("qr");
 
@@ -40,10 +41,10 @@ export function AddAccountDrawer({ open, onClose, onBound }: AddAccountDrawerPro
     <Drawer
       title={
         <div>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>
+          <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>
             XHS Account
           </div>
-          <div style={{ fontSize: 18, fontWeight: 600, color: "rgba(255,255,255,0.88)" }}>添加小红书账号</div>
+          <div style={{ fontSize: 18, fontWeight: 600, color: token.colorText }}>添加小红书账号</div>
         </div>
       }
       placement="right"
@@ -52,8 +53,8 @@ export function AddAccountDrawer({ open, onClose, onBound }: AddAccountDrawerPro
       onClose={onClose}
       destroyOnClose
       styles={{
-        header: { background: "#1f1f1f", borderBottom: "1px solid #303030" },
-        body: { background: "#141414", padding: 24 },
+        header: { background: token.colorBgElevated, borderBottom: `1px solid ${token.colorSplit}` },
+        body: { background: token.colorBgLayout, padding: 24 },
       }}
     >
       <div style={{ marginBottom: 20 }}>

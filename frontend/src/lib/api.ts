@@ -76,6 +76,16 @@ import type {
   XhsSearchNote,
   XhsQrLoginSession
 } from "../types";
+import type {
+  AdminContent,
+  AdminContentSummary,
+  AdminModelConfig,
+  AdminOverview,
+  AdminPlatformAccount,
+  AdminSystemHealth,
+  AdminTask,
+  AdminUser,
+} from "../types";
 
 const http = axios.create({
   baseURL: "/api",
@@ -872,5 +882,64 @@ export async function deleteAutoTask(taskId: number): Promise<{ id: number; stat
 
 export async function runAutoTask(taskId: number): Promise<AutoTaskRunResult> {
   const response = await http.post<AutoTaskRunResult>(`/auto-tasks/${taskId}/run`);
+  return response.data;
+}
+
+// Admin endpoints expect the same { total, page, page_size, items } envelope
+// used by the rest of the application for every collection response.
+export type AdminListParams = {
+  q?: string;
+  status?: string;
+  platform?: string;
+  type?: string;
+  page?: number;
+  page_size?: number;
+};
+
+export async function fetchAdminOverview(): Promise<AdminOverview> {
+  const response = await http.get<AdminOverview>("/admin/overview");
+  return response.data;
+}
+
+export async function fetchAdminUsers(params?: AdminListParams): Promise<Paginated<AdminUser>> {
+  const response = await http.get<Paginated<AdminUser>>("/admin/users", { params });
+  return response.data;
+}
+
+export async function updateAdminUser(
+  userId: number,
+  payload: Partial<Pick<AdminUser, "is_active" | "is_admin">>
+): Promise<AdminUser> {
+  const response = await http.patch<AdminUser>(`/admin/users/${userId}`, payload);
+  return response.data;
+}
+
+export async function fetchAdminPlatformAccounts(params?: AdminListParams): Promise<Paginated<AdminPlatformAccount>> {
+  const response = await http.get<Paginated<AdminPlatformAccount>>("/admin/platform-accounts", { params });
+  return response.data;
+}
+
+export async function fetchAdminContent(params?: AdminListParams): Promise<Paginated<AdminContent>> {
+  const response = await http.get<Paginated<AdminContent>>("/admin/content", { params });
+  return response.data;
+}
+
+export async function fetchAdminContentSummary(): Promise<AdminContentSummary> {
+  const response = await http.get<AdminContentSummary>("/admin/content/summary");
+  return response.data;
+}
+
+export async function fetchAdminTasks(params?: AdminListParams): Promise<Paginated<AdminTask>> {
+  const response = await http.get<Paginated<AdminTask>>("/admin/tasks", { params });
+  return response.data;
+}
+
+export async function fetchAdminModelConfigs(params?: AdminListParams): Promise<Paginated<AdminModelConfig>> {
+  const response = await http.get<Paginated<AdminModelConfig>>("/admin/model-configs", { params });
+  return response.data;
+}
+
+export async function fetchAdminSystemHealth(): Promise<AdminSystemHealth> {
+  const response = await http.get<AdminSystemHealth>("/admin/system-health");
   return response.data;
 }

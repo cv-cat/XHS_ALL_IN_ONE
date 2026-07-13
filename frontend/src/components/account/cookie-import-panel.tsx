@@ -42,13 +42,12 @@ export function CookieImportPanel({ accountType, onImported }: CookieImportPanel
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
       <Form layout="vertical">
-        <Form.Item label={<span style={{ color: "rgba(255,255,255,0.88)" }}>Cookie 字符串</span>}>
+        <Form.Item label="Cookie 字符串">
           <Input.TextArea
             value={cookieString}
             onChange={(e) => setCookieString(e.target.value)}
             placeholder="a1=...; web_session=...;"
             rows={6}
-            style={{ background: "#1f1f1f", borderColor: "#303030", color: "rgba(255,255,255,0.88)" }}
           />
         </Form.Item>
       </Form>
@@ -57,7 +56,6 @@ export function CookieImportPanel({ accountType, onImported }: CookieImportPanel
         <Checkbox
           checked={syncCreator}
           onChange={(event) => setSyncCreator(event.target.checked)}
-          style={{ color: "rgba(255,255,255,0.88)" }}
         >
           导入 PC Cookie 后同步 Creator 账号
         </Checkbox>

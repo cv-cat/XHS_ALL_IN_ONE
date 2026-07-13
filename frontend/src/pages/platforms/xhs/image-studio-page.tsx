@@ -25,6 +25,7 @@ import {
   Spin,
   Tabs,
   Tag,
+  theme,
   Typography,
   Upload,
 } from "antd";
@@ -56,6 +57,7 @@ function isRenderableImage(value: string): boolean {
 }
 
 export function XhsImageStudioPage() {
+  const { token } = theme.useToken();
   const [assets, setAssets] = useState<GeneratedImageAsset[]>([]);
   const [userImages, setUserImages] = useState<UserImageFile[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -267,7 +269,7 @@ export function XhsImageStudioPage() {
                       height: 60,
                       borderRadius: 4,
                       overflow: "hidden",
-                      border: "1px solid #333",
+                      border: `1px solid ${token.colorBorder}`,
                     }}
                   >
                     {isRenderableImage(url) ? (
@@ -288,10 +290,15 @@ export function XhsImageStudioPage() {
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          background: "#1a1a1a",
+                          background: token.colorFillTertiary,
                         }}
                       >
-                        <PictureOutlined style={{ fontSize: 20, color: "#666" }} />
+                        <PictureOutlined
+                          style={{
+                            fontSize: 20,
+                            color: token.colorTextQuaternary,
+                          }}
+                        />
                       </div>
                     )}
                     <Button
@@ -325,15 +332,20 @@ export function XhsImageStudioPage() {
                     width: 60,
                     height: 60,
                     borderRadius: 4,
-                    border: "1px dashed #444",
+                    border: `1px dashed ${token.colorBorder}`,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     cursor: "pointer",
-                    background: "#1a1a1a",
+                    background: token.colorFillTertiary,
                   }}
                 >
-                  <PlusOutlined style={{ fontSize: 20, color: "#666" }} />
+                  <PlusOutlined
+                    style={{
+                      fontSize: 20,
+                      color: token.colorTextQuaternary,
+                    }}
+                  />
                 </div>
               </Space>
             </div>
@@ -383,7 +395,7 @@ export function XhsImageStudioPage() {
                 </Text>
                 <div
                   style={{
-                    background: "#1a1a1a",
+                    background: token.colorFillTertiary,
                     borderRadius: 6,
                     padding: 8,
                     textAlign: "center",
@@ -453,7 +465,7 @@ export function XhsImageStudioPage() {
             {description && (
               <Paragraph
                 style={{
-                  background: "#262626",
+                  background: token.colorFillTertiary,
                   padding: 12,
                   borderRadius: 6,
                   fontSize: 13,
@@ -508,7 +520,7 @@ export function XhsImageStudioPage() {
                               marginBottom: 6,
                               overflow: "hidden",
                               borderRadius: 4,
-                              background: "#1a1a1a",
+                              background: token.colorFillTertiary,
                             }}
                           >
                             {isRenderableImage(asset.file_path) ? (
@@ -522,7 +534,10 @@ export function XhsImageStudioPage() {
                               />
                             ) : (
                               <PictureOutlined
-                                style={{ fontSize: 28, color: "#555" }}
+                                style={{
+                                  fontSize: 28,
+                                  color: token.colorTextQuaternary,
+                                }}
                               />
                             )}
                           </div>
@@ -615,7 +630,7 @@ export function XhsImageStudioPage() {
                               marginBottom: 6,
                               overflow: "hidden",
                               borderRadius: 4,
-                              background: "#1a1a1a",
+                              background: token.colorFillTertiary,
                             }}
                           >
                             <Image
@@ -696,12 +711,12 @@ export function XhsImageStudioPage() {
                             cursor: "pointer",
                             borderRadius: 4,
                             overflow: "hidden",
-                            border: "1px solid #333",
+                            border: `1px solid ${token.colorBorder}`,
                             height: 80,
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            background: "#1a1a1a",
+                            background: token.colorFillTertiary,
                           }}
                         >
                           <img
@@ -743,12 +758,12 @@ export function XhsImageStudioPage() {
                             cursor: "pointer",
                             borderRadius: 4,
                             overflow: "hidden",
-                            border: "1px solid #333",
+                            border: `1px solid ${token.colorBorder}`,
                             height: 80,
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            background: "#1a1a1a",
+                            background: token.colorFillTertiary,
                           }}
                         >
                           {isRenderableImage(asset.file_path) ? (
@@ -763,7 +778,10 @@ export function XhsImageStudioPage() {
                             />
                           ) : (
                             <PictureOutlined
-                              style={{ fontSize: 24, color: "#555" }}
+                              style={{
+                                fontSize: 24,
+                                color: token.colorTextQuaternary,
+                              }}
                             />
                           )}
                         </div>
