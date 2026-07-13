@@ -117,11 +117,14 @@ function getAuthorProfileUrl(note: SavedNote): string {
 }
 function getNoteTags(note: SavedNote): string[] {
   const raw = note.raw_json ?? {};
-  const directList = raw.tag_list ?? raw.tags;
+  const directList = raw.tag_list ?? raw.tags ?? raw.topics;
   if (Array.isArray(directList) && directList.length > 0) {
     return directList.map((t: unknown) => {
       if (typeof t === "string") return t;
-      if (t && typeof t === "object" && "name" in (t as Record<string, unknown>)) return String((t as Record<string, unknown>).name);
+      if (t && typeof t === "object") {
+        const value = (t as Record<string, unknown>).name ?? (t as Record<string, unknown>).tag_name;
+        return value ? String(value) : "";
+      }
       return "";
     }).filter(Boolean);
   }
@@ -129,15 +132,37 @@ function getNoteTags(note: SavedNote): string[] {
   const items = Array.isArray(data.items) ? data.items : [];
   const item = (items[0] && typeof items[0] === "object") ? items[0] as Record<string, unknown> : {};
   const card = (item.note_card && typeof item.note_card === "object") ? item.note_card as Record<string, unknown> : {};
-  const nestedList = card.tag_list;
+  const nestedList = card.tag_list ?? card.tags ?? card.topics;
   if (Array.isArray(nestedList) && nestedList.length > 0) {
     return nestedList.map((t: unknown) => {
       if (typeof t === "string") return t;
-      if (t && typeof t === "object" && "name" in (t as Record<string, unknown>)) return String((t as Record<string, unknown>).name);
+      if (t && typeof t === "object") {
+        const value = (t as Record<string, unknown>).name ?? (t as Record<string, unknown>).tag_name;
+        return value ? String(value) : "";
+      }
       return "";
     }).filter(Boolean);
   }
   return [];
+}
+function getDisplayTags(note: SavedNote): Array<{ key: string; name: string; color?: string }> {
+  const displayTags = (note.tags ?? []).map((tag) => ({ key: `library-${tag.id}`, name: tag.name, color: tag.color || "blue" }));
+  const existingNames = new Set(displayTags.map((tag) => tag.name));
+  for (const name of getNoteTags(note)) {
+    if (!existingNames.has(name)) {
+      displayTags.push({ key: `raw-${name}`, name, color: "default" });
+      existingNames.add(name);
+    }
+  }
+  return displayTags;
+}
+function renderNoteTags(note: SavedNote) {
+  const tags = getDisplayTags(note);
+  return tags.length ? (
+    <Space size={4} wrap>
+      {tags.map((t) => <Tag key={t.key} color={t.color}>{t.name}</Tag>)}
+    </Space>
+  ) : <Text type="secondary">-</Text>;
 }
 function getNoteEngagement(note: SavedNote): { likes: number; collects: number; comments: number; shares: number } {
   const raw = note.raw_json ?? {};
@@ -344,7 +369,7 @@ export function XhsLibraryPage() {
     { title: "作者", dataIndex: "author_name", width: 120 },
     { title: "笔记 ID", dataIndex: "note_id", width: 140, ellipsis: true },
     { title: "保存时间", dataIndex: "created_at", width: 160, render: (v: string) => formatSavedTime(v) },
-    { title: "标签", key: "tags", width: 180, render: (_, n) => n.tags?.length ? <Space size={4} wrap>{n.tags.map((t) => <Tag key={t.id} color="blue">{t.name}</Tag>)}</Space> : <Text type="secondary">-</Text> },
+    { title: "标签", key: "tags", width: 180, render: (_, n) => renderNoteTags(n) },
     { title: "操作", key: "actions", width: 80, render: (_, n) => <Button type="text" danger icon={<DeleteOutlined />} size="small" onClick={(e) => { e.stopPropagation(); void handleDeleteNote(n); }} /> },
   ];
 
@@ -437,7 +462,11 @@ export function XhsLibraryPage() {
                       })()}
                     </>
                   } />
-                  {note.tags?.length ? <div style={{ marginTop: 6 }}>{note.tags.map((t) => <Tag key={t.id} color="blue" style={{ fontSize: 11 }}>{t.name}</Tag>)}</div> : null}
+                  {getDisplayTags(note).length ? (
+                    <div style={{ marginTop: 6 }}>
+                      {getDisplayTags(note).map((t) => <Tag key={t.key} color={t.color} style={{ fontSize: 11 }}>{t.name}</Tag>)}
+                    </div>
+                  ) : null}
                 </Card>
               </Col>
             );
@@ -458,11 +487,8 @@ export function XhsLibraryPage() {
               <Descriptions.Item label="保存时间">{formatSavedTime(selectedNote.created_at)}</Descriptions.Item>
               {getNotePublishTime(selectedNote) && <Descriptions.Item label="发布时间">{getNotePublishTime(selectedNote)}</Descriptions.Item>}
               <Descriptions.Item label="作品链接"><Typography.Link href={getNoteUrl(selectedNote)} target="_blank" rel="noreferrer" style={{ fontSize: 12, wordBreak: "break-all" }}>{getNoteUrl(selectedNote)}</Typography.Link></Descriptions.Item>
+              <Descriptions.Item label="标签">{renderNoteTags(selectedNote)}</Descriptions.Item>
             </Descriptions>
-
-            {getNoteTags(selectedNote).length > 0 && (
-              <div style={{ marginBottom: 12 }}>{getNoteTags(selectedNote).map((t) => <Tag key={t} color="blue">#{t}</Tag>)}</div>
-            )}
 
             <Button type="link" icon={<LinkOutlined />} href={getNoteUrl(selectedNote)} target="_blank" rel="noreferrer" style={{ padding: 0, marginBottom: 16 }}>查看原文</Button>
 

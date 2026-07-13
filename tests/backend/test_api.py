@@ -2412,11 +2412,32 @@ def test_notes_export_writes_csv_for_owned_notes(tmp_path):
                         "title": "CSV 标题",
                         "content": "CSV 正文",
                         "author_name": "CSV 作者",
+                        "raw": {"tags": ["Raw Topic", {"name": "Structured Topic"}]},
                     }
                 ],
             },
         )
         note_id = save_response.json()["items"][0]["id"]
+        first_tag_response = client.post(
+            "/api/tags",
+            headers={"Authorization": f"Bearer {owner_token}"},
+            json={"name": "CSV Export", "color": "#111111"},
+        )
+        second_tag_response = client.post(
+            "/api/tags",
+            headers={"Authorization": f"Bearer {owner_token}"},
+            json={"name": "Library Tag", "color": "#222222"},
+        )
+        tag_response = client.post(
+            "/api/notes/batch-tag",
+            headers={"Authorization": f"Bearer {owner_token}"},
+            json={
+                "note_ids": [note_id],
+                "tag_ids": [first_tag_response.json()["id"], second_tag_response.json()["id"]],
+                "mode": "replace",
+            },
+        )
+        assert [tag["name"] for tag in tag_response.json()["items"][0]["tags"]] == ["CSV Export", "Library Tag"]
 
         response = client.post(
             "/api/notes/export",
@@ -2436,6 +2457,7 @@ def test_notes_export_writes_csv_for_owned_notes(tmp_path):
         assert "note_id,title,author_name,content,tags,created_at" in csv_text
         assert "export-csv-001" in csv_text
         assert "CSV 标题" in csv_text
+        assert "CSV Export Library Tag Raw Topic Structured Topic" in csv_text
     finally:
         app.dependency_overrides.pop(db_dependency, None)
 

@@ -121,13 +121,47 @@ def _serialize_note_with_tags(db: Session, note: Note) -> dict:
     return serialized
 
 
+def _raw_note_tag_names(note: Note) -> list[str]:
+    raw = note.raw_json if isinstance(note.raw_json, dict) else {}
+    raw_tags = raw.get("tag_list") or raw.get("tags") or raw.get("topics") or []
+    if not raw_tags:
+        data = raw.get("data")
+        items = data.get("items") if isinstance(data, dict) else []
+        item = items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else {}
+        card = item.get("note_card") if isinstance(item, dict) and isinstance(item.get("note_card"), dict) else {}
+        raw_tags = card.get("tag_list") or card.get("tags") or card.get("topics") or []
+    if not isinstance(raw_tags, list):
+        return []
+    names: list[str] = []
+    for raw_tag in raw_tags:
+        if isinstance(raw_tag, str):
+            name = raw_tag
+        elif isinstance(raw_tag, dict):
+            value = raw_tag.get("name") or raw_tag.get("tag_name")
+            name = str(value) if value is not None else ""
+        else:
+            name = ""
+        name = name.strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _export_note_tag_names(db: Session, note: Note) -> list[str]:
+    names = [tag["name"] for tag in _get_note_tags(db, note.id)]
+    for name in _raw_note_tag_names(note):
+        if name not in names:
+            names.append(name)
+    return names
+
+
 def _build_notes_csv(db: Session, notes: list[Note]) -> str:
     output = io.StringIO()
     fieldnames = ["note_id", "title", "author_name", "content", "tags", "created_at"]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
     for note in notes:
-        tags = ",".join(tag["name"] for tag in _get_note_tags(db, note.id))
+        tags = " ".join(_export_note_tag_names(db, note))
         writer.writerow(
             {
                 "note_id": note.note_id,
