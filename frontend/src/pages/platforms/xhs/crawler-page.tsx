@@ -14,10 +14,12 @@ import type { ColumnsType } from "antd/es/table";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { crawlXhsDataStream, fetchAccounts } from "../../../lib/api";
+import { crawlXhsDataStream, crawlXhsUserNotes, fetchAccounts } from "../../../lib/api";
 import type { PlatformAccount, XhsDataCrawlItem, XhsDataCrawlMode } from "../../../types";
 
 const { Title, Text } = Typography;
+
+type CollectionUiMode = XhsDataCrawlMode | "profile_notes";
 
 const sortOptions = [
   { value: 0, label: "综合排序" },
@@ -123,13 +125,16 @@ function spiderStyleNoteRow(item: XhsDataCrawlItem): string[] {
   const h264 = firstRecord(stream.h264);
   const user_id = textValue(note.author_id, author.user_id, author.id);
   const note_url = textValue(note.note_url, card.note_url, card.url, rawItem.note_url, rawItem.url, item.source.startsWith("http") ? item.source : "");
+  const profileOrigin = note_url.startsWith("https://www.rednote.com/")
+    ? "https://www.rednote.com"
+    : "https://www.xiaohongshu.com";
   const upload_time = dateText(textValue(card.time, card.create_time, rawItem.time, rawItem.create_time));
   const originVideoKey = textValue(asRecord(video.consumer).origin_video_key);
   const video_addr = textValue(h264.master_url, h264.url, originVideoKey ? `https://sns-video-bd.xhscdn.com/${originVideoKey}` : "");
   return [
     textValue(note.note_id, card.note_id, card.id, rawItem.id), note_url,
     noteTypeText(textValue(note.type, card.type, rawItem.model_type)),
-    user_id, user_id ? `https://www.xiaohongshu.com/user/profile/${user_id}` : "",
+    user_id, user_id ? `${profileOrigin}/user/profile/${user_id}` : "",
     textValue(note.author_name, author.nickname, author.name),
     textValue(note.author_avatar, author.avatar, author.avatar_url),
     textValue(note.title, card.title, card.display_title),
@@ -145,7 +150,18 @@ function spiderStyleNoteRow(item: XhsDataCrawlItem): string[] {
 }
 
 function exportRowsToExcel(items: XhsDataCrawlItem[]) {
-  const rows = items.map((item) => [item.status, item.source, item.error, ...spiderStyleNoteRow(item), item.comment_count, (item.comments ?? []).map((c) => c.content).join("\n")]);
+  const rows = items.map((item) => {
+    const isRednoteItem = item.source.startsWith("https://www.rednote.com/")
+      || item.note?.note_url?.startsWith("https://www.rednote.com/");
+    return [
+      item.status,
+      item.source,
+      item.error,
+      ...spiderStyleNoteRow(item),
+      isRednoteItem ? "不支持" : item.comment_count,
+      isRednoteItem ? "不支持" : (item.comments ?? []).map((c) => c.content).join("\n"),
+    ];
+  });
   const headers = ["抓取状态", "来源", "错误", ...noteExcelHeaders, "抓取评论数", "评论内容"];
   const table = [headers, ...rows].map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("");
   const html = `<html><head><meta charset="UTF-8"></head><body><table>${table}</table></body></html>`;
@@ -163,7 +179,7 @@ function exportRowsToExcel(items: XhsDataCrawlItem[]) {
 export function XhsCrawlerPage() {
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
-  const [mode, setMode] = useState<XhsDataCrawlMode>("note_urls");
+  const [mode, setMode] = useState<CollectionUiMode>("note_urls");
   const [urls, setUrls] = useState("");
   const [keyword, setKeyword] = useState("");
   const [pages, setPages] = useState(1);
@@ -178,8 +194,33 @@ export function XhsCrawlerPage() {
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [librarySummary, setLibrarySummary] = useState<{
+    resultCount: number;
+    savedCount: number;
+    terminalError: string | null;
+  } | null>(null);
 
-  const pcAccounts = useMemo(() => accounts.filter((a) => a.platform === "xhs" && a.sub_type === "pc"), [accounts]);
+  const collectionAccounts = useMemo(
+    () => accounts.filter(
+      (a) => a.platform === "xhs" && (a.sub_type === "pc" || a.sub_type === "rednote_pc"),
+    ),
+    [accounts],
+  );
+  const selectedAccount = useMemo(
+    () => collectionAccounts.find((account) => account.id === selectedAccountId) ?? null,
+    [collectionAccounts, selectedAccountId],
+  );
+  const isRednoteAccount = selectedAccount?.sub_type === "rednote_pc";
+  const crawlModeOptions: Array<{ value: CollectionUiMode; label: string }> = isRednoteAccount
+    ? [
+        { value: "profile_notes", label: "采集公开主页笔记列表" },
+        { value: "note_urls", label: "采集单篇 Rednote 笔记详情" },
+      ]
+    : [
+        { value: "note_urls", label: "直接爬取笔记链接" },
+        { value: "search", label: "通过搜索爬取详情" },
+        { value: "comments", label: "只爬取评论" },
+      ];
 
   async function loadAccounts() {
     setIsLoadingAccounts(true);
@@ -187,8 +228,16 @@ export function XhsCrawlerPage() {
     try {
       const loaded = await fetchAccounts("xhs");
       setAccounts(loaded);
-      const first = loaded.find((a) => a.sub_type === "pc");
-      setSelectedAccountId((c) => c ?? first?.id ?? null);
+      const selectable = loaded.filter(
+        (a) => a.sub_type === "pc" || (
+          a.sub_type === "rednote_pc" && a.status === "active" && Boolean(a.external_user_id)
+        ),
+      );
+      setSelectedAccountId((current) => (
+        selectable.some((account) => account.id === current)
+          ? current
+          : selectable[0]?.id ?? null
+      ));
     } catch { setError("账号列表加载失败。"); }
     finally { setIsLoadingAccounts(false); }
   }
@@ -196,35 +245,81 @@ export function XhsCrawlerPage() {
   async function handleRun(e?: FormEvent) {
     e?.preventDefault();
     setError(null);
-    if (!selectedAccountId) { setError("请先选择一个 PC 账号。"); return; }
+    if (!selectedAccountId) { setError("请先选择一个采集账号。"); return; }
+    if (isRednoteAccount && mode !== "note_urls" && mode !== "profile_notes") {
+      setError("Rednote 采集账号当前只支持公开主页列表和单篇笔记详情。");
+      return;
+    }
     const parsedUrls = splitUrls(urls);
-    if (mode !== "search" && parsedUrls.length === 0) { setError("请至少输入一个笔记链接。"); return; }
+    if (mode === "profile_notes" && parsedUrls.length !== 1) { setError("请输入一个 Rednote 用户主页链接。"); return; }
+    if (mode !== "search" && mode !== "profile_notes" && parsedUrls.length === 0) { setError("请至少输入一个笔记链接。"); return; }
     if (mode === "search" && !keyword.trim()) { setError("请填写搜索关键词。"); return; }
     setIsRunning(true);
     setItems([]);
     setSuccessCount(0);
     setFailedCount(0);
     setProgressMsg(null);
+    setLibrarySummary(null);
     try {
-      const summary = await crawlXhsDataStream(
-        { account_id: selectedAccountId, mode, urls: parsedUrls, keyword: keyword.trim(), pages, max_notes: maxNotes, time_sleep: timeSleep, fetch_comments: mode === "comments" ? false : fetchCommentsChecked, ...filters, geo: filters.geo.trim() },
-        (index, item) => { setItems((prev) => [...prev, item]); },
-        (msg) => { setProgressMsg(msg); },
-        (msg) => { setError(msg); },
-      );
-      setSuccessCount(summary.success_count);
-      setFailedCount(summary.failed_count);
-      setProgressMsg(null);
+      if (mode === "profile_notes") {
+        const summary = await crawlXhsUserNotes({
+          account_id: selectedAccountId,
+          user_url: parsedUrls[0],
+          save_to_library: true,
+        });
+        setLibrarySummary({
+          resultCount: summary.result_count,
+          savedCount: summary.saved_count,
+          terminalError: null,
+        });
+      } else {
+        const summary = await crawlXhsDataStream(
+          { account_id: selectedAccountId, mode, urls: parsedUrls, keyword: keyword.trim(), pages, max_notes: maxNotes, time_sleep: timeSleep, fetch_comments: isRednoteAccount || mode === "comments" ? false : fetchCommentsChecked, ...filters, geo: filters.geo.trim() },
+          (index, item) => { setItems((prev) => [...prev, item]); },
+          (msg) => { setProgressMsg(msg); },
+          (msg) => { setError(msg); },
+        );
+        setSuccessCount(summary.success_count);
+        setFailedCount(summary.failed_count);
+        if (isRednoteAccount) {
+          setLibrarySummary({
+            resultCount: summary.success_count,
+            savedCount: summary.saved_count,
+            terminalError: summary.terminal_error,
+          });
+        }
+        if (summary.terminal_error) {
+          if (isRednoteAccount) await loadAccounts();
+          setError(summary.terminal_error);
+        }
+        setProgressMsg(null);
+      }
     } catch (err: unknown) {
-      const axiosErr = err as { message?: string };
-      setError(axiosErr?.message || "抓取失败");
+      const axiosErr = err as {
+        message?: string;
+        response?: { data?: { detail?: string } };
+      };
+      const message = axiosErr.response?.data?.detail || axiosErr.message || "抓取失败";
+      if (isRednoteAccount) await loadAccounts();
+      setError(message);
     }
     finally { setIsRunning(false); }
   }
 
   useEffect(() => { void loadAccounts(); }, []);
+  useEffect(() => {
+    setMode((currentMode) => {
+      if (isRednoteAccount) return "profile_notes";
+      return currentMode === "profile_notes" ? "note_urls" : currentMode;
+    });
+    if (isRednoteAccount) setFetchCommentsChecked(false);
+  }, [isRednoteAccount]);
 
-  const noPcAccount = !isLoadingAccounts && pcAccounts.length === 0;
+  const noCollectionAccount = !isLoadingAccounts && !collectionAccounts.some(
+    (account) => account.sub_type === "pc" || (
+      account.status === "active" && Boolean(account.external_user_id)
+    ),
+  );
 
   const columns: ColumnsType<XhsDataCrawlItem> = [
     {
@@ -237,7 +332,7 @@ export function XhsCrawlerPage() {
     { title: "标题", key: "title", width: 200, ellipsis: true, render: (_, item) => item.note?.title || "-" },
     { title: "作者", key: "author", width: 100, render: (_, item) => item.note?.author_name || "-" },
     { title: "互动", key: "engagement", width: 180, render: (_, item) => item.note ? <Text type="secondary" style={{ fontSize: 12 }}>赞{item.note.likes} 藏{item.note.collects} 评{item.note.comments}</Text> : "-" },
-    { title: "评论", key: "comments", width: 80, render: (_, item) => <Space size={4}><CommentOutlined />{item.comment_count}</Space> },
+    { title: "评论正文", key: "comments", width: 90, render: (_, item) => isRednoteAccount ? <Text type="secondary">不支持</Text> : <Space size={4}><CommentOutlined />{item.comment_count}</Space> },
     { title: "错误", dataIndex: "error", ellipsis: true, render: (err: string) => err ? <Text type="danger" style={{ fontSize: 12 }}>{err}</Text> : "-" },
   ];
 
@@ -246,7 +341,7 @@ export function XhsCrawlerPage() {
       <Row justify="space-between" align="middle" style={{ marginBottom: 24 }}>
         <Col>
           <Title level={4} style={{ margin: 0 }}>数据抓取</Title>
-          <Text type="secondary">搜索结果、笔记详情和评论抓取，失败项单独标注并可导出 Excel</Text>
+          <Text type="secondary">中国站账号支持搜索、详情和评论；Rednote 账号支持公开主页列表和单篇详情</Text>
         </Col>
         <Col>
           <Button icon={<ReloadOutlined />} onClick={loadAccounts} loading={isLoadingAccounts}>刷新账号</Button>
@@ -257,23 +352,27 @@ export function XhsCrawlerPage() {
         <Form layout="vertical" onFinish={() => void handleRun()}>
           <Row gutter={16}>
             <Col span={8}>
-              <Form.Item label="PC 账号">
-                <Select value={selectedAccountId} onChange={setSelectedAccountId} placeholder="选择 PC 账号" options={pcAccounts.map((a) => ({ value: a.id, label: `${a.nickname || `PC 账号 ${a.id}`} · ${a.status}` }))} />
+              <Form.Item label="采集账号">
+                <Select value={selectedAccountId} onChange={setSelectedAccountId} placeholder="选择采集账号" options={collectionAccounts.map((a) => ({ value: a.id, label: `${a.sub_type === "rednote_pc" ? "Rednote" : "小红书"} · ${a.nickname || `账号 ${a.id}`} · ${a.status}`, disabled: a.sub_type === "rednote_pc" && (a.status !== "active" || !a.external_user_id) }))} />
               </Form.Item>
             </Col>
             <Col span={8}>
               <Form.Item label="抓取方式">
-                <Select value={mode} onChange={(v) => setMode(v)} options={[{ value: "note_urls", label: "直接爬取笔记链接" }, { value: "search", label: "通过搜索爬取详情" }, { value: "comments", label: "只爬取评论" }]} />
+                <Select<CollectionUiMode> value={mode} onChange={setMode} options={crawlModeOptions} />
               </Form.Item>
             </Col>
-            <Col span={4}>
-              <Form.Item label="Time Sleep">
-                <InputNumber min={0} max={60} step={0.5} value={timeSleep} onChange={(v) => setTimeSleep(v ?? 1)} style={{ width: "100%" }} />
-              </Form.Item>
-            </Col>
-            <Col span={4} style={{ display: "flex", alignItems: "center", paddingTop: 8 }}>
-              <Checkbox checked={fetchCommentsChecked} onChange={(e) => setFetchCommentsChecked(e.target.checked)} disabled={mode === "comments"}>同时抓取评论</Checkbox>
-            </Col>
+            {mode !== "profile_notes" && (
+              <Col span={4}>
+                <Form.Item label="Time Sleep">
+                  <InputNumber min={0} max={60} step={0.5} value={timeSleep} onChange={(v) => setTimeSleep(v ?? 1)} style={{ width: "100%" }} />
+                </Form.Item>
+              </Col>
+            )}
+            {!isRednoteAccount && (
+              <Col span={4} style={{ display: "flex", alignItems: "center", paddingTop: 8 }}>
+                <Checkbox checked={fetchCommentsChecked} onChange={(e) => setFetchCommentsChecked(e.target.checked)} disabled={mode === "comments"}>同时抓取评论</Checkbox>
+              </Col>
+            )}
           </Row>
 
           {mode === "search" ? (
@@ -287,26 +386,42 @@ export function XhsCrawlerPage() {
               <Col span={4}><Form.Item label="Geo"><Input value={filters.geo} onChange={(e) => setFilters((c) => ({ ...c, geo: e.target.value }))} placeholder="经纬度" /></Form.Item></Col>
             </Row>
           ) : (
-            <Form.Item label="笔记链接"><Input.TextArea value={urls} onChange={(e) => setUrls(e.target.value)} placeholder="每行一个链接，也可以用英文逗号分隔" rows={4} /></Form.Item>
+            <Form.Item label={mode === "profile_notes" ? "Rednote 用户主页链接" : isRednoteAccount ? "Rednote 笔记链接" : "笔记链接"}><Input.TextArea value={urls} onChange={(e) => setUrls(e.target.value)} placeholder={mode === "profile_notes" ? "https://www.rednote.com/user/profile/..." : isRednoteAccount ? "每行一个 https://www.rednote.com/explore/... 链接" : "每行一个链接，也可以用英文逗号分隔"} rows={4} /></Form.Item>
+          )}
+
+          {isRednoteAccount && (
+            <Alert message="Rednote 采集账号当前只支持公开主页笔记列表和单篇笔记详情；搜索、评论、监控与发布仍未开放。" type="info" showIcon style={{ marginBottom: 16 }} />
           )}
 
           <Space>
-            <Button type="primary" htmlType="submit" loading={isRunning} disabled={noPcAccount} icon={mode === "search" ? <SearchOutlined /> : <CloudDownloadOutlined />}>
+            <Button type="primary" htmlType="submit" loading={isRunning} disabled={noCollectionAccount} icon={mode === "search" ? <SearchOutlined /> : <CloudDownloadOutlined />}>
               {isRunning ? "抓取中..." : "开始抓取"}
             </Button>
-            <Button icon={<FileExcelOutlined />} onClick={() => items.length && exportRowsToExcel(items)} disabled={!items.length}>导出 Excel</Button>
+            {mode !== "profile_notes" && <Button icon={<FileExcelOutlined />} onClick={() => items.length && exportRowsToExcel(items)} disabled={!items.length}>导出 Excel</Button>}
           </Space>
         </Form>
 
         {error && <Alert message={error} type="error" showIcon style={{ marginTop: 16 }} />}
-        {noPcAccount && (
-          <Empty description="还没有可用的 PC 账号" style={{ marginTop: 24 }}>
+        {noCollectionAccount && (
+          <Empty description="还没有可用的采集账号" style={{ marginTop: 24 }}>
             <Link to="/platforms/xhs/accounts"><Button type="primary" icon={<LinkOutlined />}>去绑定账号</Button></Link>
           </Empty>
         )}
       </Card>
 
-      <Card title={<Space><Title level={5} style={{ margin: 0 }}>抓取结果</Title><Text type="secondary">成功 {successCount} · 失败 {failedCount}{isRunning && progressMsg ? ` · ${progressMsg}` : ""}{isRunning ? " · 抓取中..." : ""}</Text></Space>}>
+      {librarySummary && (
+        <Alert
+          type={librarySummary.terminalError ? "warning" : "success"}
+          showIcon
+          message={librarySummary.terminalError
+            ? `采集已停止：已成功处理 ${librarySummary.resultCount} 篇，保存到内容库 ${librarySummary.savedCount} 篇`
+            : `采集完成：成功 ${librarySummary.resultCount} 篇，保存到内容库 ${librarySummary.savedCount} 篇`}
+          action={<Link to="/platforms/xhs/library">进入内容库</Link>}
+          style={{ marginBottom: 24 }}
+        />
+      )}
+
+      {mode !== "profile_notes" && <Card title={<Space><Title level={5} style={{ margin: 0 }}>抓取结果</Title><Text type="secondary">成功 {successCount} · 失败 {failedCount}{isRunning && progressMsg ? ` · ${progressMsg}` : ""}{isRunning ? " · 抓取中..." : ""}</Text></Space>}>
         {items.length === 0 && !isRunning ? (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="执行抓取后，结果会显示在这里" />
         ) : (
@@ -320,7 +435,7 @@ export function XhsCrawlerPage() {
             rowClassName={(item) => item.status === "failed" ? "ant-table-row-error" : ""}
           />
         )}
-      </Card>
+      </Card>}
     </div>
   );
 }

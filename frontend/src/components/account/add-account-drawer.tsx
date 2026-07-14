@@ -1,5 +1,5 @@
 import { Drawer, Segmented, message } from "antd";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { PlatformAccount } from "../../types";
 import { CookieImportPanel } from "./cookie-import-panel";
@@ -12,12 +12,14 @@ type AddAccountDrawerProps = {
   onBound: () => void;
 };
 
-type AccountType = "pc" | "creator";
+type AccountType = "pc" | "creator" | "rednote_pc";
+type XhsLoginAccountType = Exclude<AccountType, "rednote_pc">;
 type LoginMethod = "qr" | "phone" | "cookie";
 
 const accountTypeOptions = [
   { label: "PC", value: "pc" as const },
   { label: "Creator", value: "creator" as const },
+  { label: "Rednote PC", value: "rednote_pc" as const },
 ];
 
 const loginMethodOptions = [
@@ -36,14 +38,24 @@ export function AddAccountDrawer({ open, onClose, onBound }: AddAccountDrawerPro
     onBound();
   }
 
+  useEffect(() => {
+    if (accountType === "rednote_pc") {
+      setMethod("cookie");
+    }
+  }, [accountType]);
+
+  const availableLoginMethods = accountType === "rednote_pc"
+    ? loginMethodOptions.filter((option) => option.value === "cookie")
+    : loginMethodOptions;
+
   return (
     <Drawer
       title={
         <div>
           <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>
-            XHS Account
+            XHS / Rednote Account
           </div>
-          <div style={{ fontSize: 18, fontWeight: 600, color: "rgba(255,255,255,0.88)" }}>添加小红书账号</div>
+          <div style={{ fontSize: 18, fontWeight: 600, color: "rgba(255,255,255,0.88)" }}>添加账号</div>
         </div>
       }
       placement="right"
@@ -69,17 +81,19 @@ export function AddAccountDrawer({ open, onClose, onBound }: AddAccountDrawerPro
         <Segmented
           block
           value={method}
-          options={loginMethodOptions}
+          options={availableLoginMethods}
           onChange={(val) => setMethod(val as LoginMethod)}
         />
       </div>
 
-      {method === "qr" ? (
-        <QrLoginPanel accountType={accountType} onConfirmed={handleConfirmed} />
+      {accountType === "rednote_pc" ? (
+        <CookieImportPanel key={accountType} accountType={accountType} onImported={handleConfirmed} />
+      ) : method === "qr" ? (
+        <QrLoginPanel accountType={accountType as XhsLoginAccountType} onConfirmed={handleConfirmed} />
       ) : method === "cookie" ? (
-        <CookieImportPanel accountType={accountType} onImported={handleConfirmed} />
+        <CookieImportPanel key={accountType} accountType={accountType} onImported={handleConfirmed} />
       ) : (
-        <PhoneLoginPanel accountType={accountType} onConfirmed={handleConfirmed} />
+        <PhoneLoginPanel accountType={accountType as XhsLoginAccountType} onConfirmed={handleConfirmed} />
       )}
     </Drawer>
   );

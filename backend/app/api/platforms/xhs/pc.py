@@ -132,24 +132,31 @@ def _tag_names(value: Any) -> list[str]:
     return tags
 
 
-def _note_url(note_id: str, item: dict[str, Any], card: dict[str, Any]) -> str:
+def _note_url(
+    note_id: str,
+    item: dict[str, Any],
+    card: dict[str, Any],
+    frontend_origin: str = "https://www.xiaohongshu.com",
+    allow_response_urls: bool = True,
+) -> str:
     xsec_token = card.get("xsec_token") or item.get("xsec_token") or ""
     if note_id and xsec_token:
         xsec_source = card.get("xsec_source") or item.get("xsec_source") or "pc_feed"
-        return f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={xsec_token}&xsec_source={xsec_source}"
-    for value in (
-        card.get("note_url"),
-        card.get("url"),
-        card.get("share_url"),
-        item.get("note_url"),
-        item.get("url"),
-        item.get("share_url"),
-    ):
-        if isinstance(value, str) and value:
-            return value
+        return f"{frontend_origin}/explore/{note_id}?xsec_token={xsec_token}&xsec_source={xsec_source}"
+    if allow_response_urls:
+        for value in (
+            card.get("note_url"),
+            card.get("url"),
+            card.get("share_url"),
+            item.get("note_url"),
+            item.get("url"),
+            item.get("share_url"),
+        ):
+            if isinstance(value, str) and value:
+                return value
     if not note_id:
         return ""
-    return f"https://www.xiaohongshu.com/explore/{note_id}"
+    return f"{frontend_origin}/explore/{note_id}"
 
 
 def _comment_id(comment: dict[str, Any]) -> str:
@@ -217,7 +224,11 @@ def normalize_comment_payload(raw_payload: Any) -> list[dict[str, Any]]:
     return _flatten_comments(_extract_comment_list(raw_payload))
 
 
-def _normalize_search_item(item: dict[str, Any]) -> dict[str, Any]:
+def _normalize_search_item(
+    item: dict[str, Any],
+    frontend_origin: str = "https://www.xiaohongshu.com",
+    allow_response_urls: bool = True,
+) -> dict[str, Any]:
     card = item.get("note_card") or item.get("note") or item
     author = card.get("user") or card.get("author") or {}
     interact = card.get("interact_info") or card.get("interaction") or {}
@@ -225,7 +236,13 @@ def _normalize_search_item(item: dict[str, Any]) -> dict[str, Any]:
     timestamp = card.get("time") or card.get("create_time") or item.get("time") or item.get("create_time") or 0
     return {
         "note_id": note_id,
-        "note_url": _note_url(str(note_id), item, card),
+        "note_url": _note_url(
+            str(note_id),
+            item,
+            card,
+            frontend_origin,
+            allow_response_urls,
+        ),
         "title": card.get("display_title") or card.get("title") or "",
         "content": card.get("desc") or card.get("content") or "",
         "author_id": author.get("user_id") or author.get("id") or "",
@@ -278,13 +295,18 @@ def _normalize_detail_payload(raw_payload: dict[str, Any], source_url: str = "")
     return normalized
 
 
-def _get_owned_pc_account_cookies(db: Session, current_user: User, account_id: int) -> str:
+def _get_owned_pc_account_cookies(
+    db: Session,
+    current_user: User,
+    account_id: int,
+    allowed_sub_types: tuple[str, ...] = ("pc",),
+) -> str:
     account = db.get(PlatformAccount, account_id)
     if (
         account is None
         or account.user_id != current_user.id
         or account.platform != "xhs"
-        or account.sub_type != "pc"
+        or account.sub_type not in allowed_sub_types
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
 

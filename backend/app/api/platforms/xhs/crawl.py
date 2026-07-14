@@ -10,16 +10,24 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from backend.app.adapters.xhs.rednote_account_adapter import (
+    RednoteAccountError,
+    RednoteRequestUnavailableError,
+    RednoteSessionInvalidError,
+    RednoteVerificationRequiredError,
+)
+from backend.app.adapters.xhs.rednote_pc_api_adapter import RednotePcApiAdapter
 from backend.app.api.platforms.xhs.pc import (
     _get_owned_pc_account_cookies,
     _normalize_detail_payload,
     _normalize_search_item,
-    normalize_comment_payload,
     get_xhs_pc_api_adapter_factory,
+    normalize_comment_payload,
 )
 from backend.app.api.tasks import serialize_task
 from backend.app.core.database import get_db
 from backend.app.core.deps import get_current_user
+from backend.app.core.time import shanghai_now
 from backend.app.models import Note, NoteAsset, PlatformAccount, Task, User
 
 router = APIRouter(prefix="/xhs/crawl", tags=["xhs-crawl"])
@@ -106,14 +114,21 @@ def _complete_task(db: Session, task: Task, payload: dict[str, Any]) -> Task:
     return task
 
 
-def _fail_task(db: Session, task: Task, error: str) -> None:
+def _fail_task(
+    db: Session,
+    task: Task,
+    error: str,
+    details: dict[str, Any] | None = None,
+) -> None:
     task.status = "failed"
     task.progress = 100
-    task.payload = {**(task.payload or {}), "error": error}
+    task.payload = {**(task.payload or {}), **(details or {}), "error": error}
     db.commit()
 
 
 def _data_items(raw_payload: Any) -> list[dict[str, Any]]:
+    if isinstance(raw_payload, list):
+        return [item for item in raw_payload if isinstance(item, dict)]
     if not isinstance(raw_payload, dict):
         return []
     data = raw_payload.get("data") if isinstance(raw_payload.get("data"), dict) else raw_payload
@@ -150,6 +165,8 @@ def _save_normalized_notes(
     db: Session,
     account: PlatformAccount,
     normalized_items: list[dict[str, Any]],
+    *,
+    download_assets: bool = True,
 ) -> list[Note]:
     saved: list[Note] = []
     for normalized in normalized_items:
@@ -162,19 +179,55 @@ def _save_normalized_notes(
         if note is None:
             note = Note(user_id=account.user_id, platform_account_id=account.id, platform=account.platform, note_id=note_id)
             db.add(note)
+        note.platform_account_id = account.id
+        note.platform = account.platform
         note.title = str(normalized.get("title") or "")
         note.content = str(normalized.get("content") or "")
         note.author_name = str(normalized.get("author_name") or "")
         note.raw_json = _raw_with_metrics(normalized)
         db.flush()
-        db.execute(delete(NoteAsset).where(NoteAsset.note_id == note.id))
+
+        retained_asset_keys: set[tuple[str, str]] = set()
+        if download_assets:
+            db.execute(delete(NoteAsset).where(NoteAsset.note_id == note.id))
+        else:
+            existing_assets = db.scalars(
+                select(NoteAsset).where(NoteAsset.note_id == note.id)
+            ).all()
+            remote_only_asset_ids: list[int] = []
+            for asset in existing_assets:
+                if str(asset.local_path or "").strip():
+                    retained_asset_keys.add((asset.asset_type, asset.url))
+                else:
+                    remote_only_asset_ids.append(asset.id)
+            if remote_only_asset_ids:
+                db.execute(
+                    delete(NoteAsset).where(
+                        NoteAsset.id.in_(remote_only_asset_ids)
+                    )
+                )
+
         for url in _image_urls(normalized):
-            local_name = _download_asset(url, account.user_id, "image")
+            asset_key = ("image", url)
+            if asset_key in retained_asset_keys:
+                continue
+            local_name = (
+                _download_asset(url, account.user_id, "image")
+                if download_assets
+                else None
+            )
             db.add(NoteAsset(note_id=note.id, asset_type="image", url=url, local_path=local_name or ""))
+            retained_asset_keys.add(asset_key)
         video_url = _video_url(normalized)
-        if video_url:
-            local_name = _download_asset(video_url, account.user_id, "video")
+        video_key = ("video", video_url)
+        if video_url and video_key not in retained_asset_keys:
+            local_name = (
+                _download_asset(video_url, account.user_id, "video")
+                if download_assets
+                else None
+            )
             db.add(NoteAsset(note_id=note.id, asset_type="video", url=video_url, local_path=local_name or ""))
+            retained_asset_keys.add(video_key)
         saved.append(note)
 
     db.commit()
@@ -211,16 +264,71 @@ def _crawl_data_item(
     }
 
 
-def _owned_pc_account(db: Session, current_user: User, account_id: int) -> PlatformAccount:
+def _owned_pc_account(
+    db: Session,
+    current_user: User,
+    account_id: int,
+    allowed_sub_types: tuple[str, ...] = ("pc",),
+) -> PlatformAccount:
     account = db.get(PlatformAccount, account_id)
     if (
         account is None
         or account.user_id != current_user.id
         or account.platform != "xhs"
-        or account.sub_type != "pc"
+        or account.sub_type not in allowed_sub_types
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    if account.sub_type == "rednote_pc":
+        if account.status != "active":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Rednote account must pass its account check before collection",
+            )
+        if not str(account.external_user_id or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Rednote account is missing its verified identity anchor",
+            )
     return account
+
+
+def _collection_adapter(account: PlatformAccount, cookies: str, pc_adapter_factory):
+    if account.sub_type == "rednote_pc":
+        return RednotePcApiAdapter(cookies)
+    return pc_adapter_factory(cookies)
+
+
+def _apply_rednote_collection_failure(
+    account: PlatformAccount,
+    exc: RednoteAccountError,
+) -> str:
+    if isinstance(exc, RednoteVerificationRequiredError):
+        account.status = "risk"
+        message = "Rednote requires interactive verification"
+    elif isinstance(exc, RednoteSessionInvalidError):
+        account.status = "expired"
+        message = "Rednote session is invalid or expired"
+    elif isinstance(exc, RednoteRequestUnavailableError):
+        account.status = "unknown"
+        message = "Rednote collection is temporarily unavailable"
+    else:
+        account.status = "unknown"
+        message = "Rednote collection stopped safely"
+    account.status_message = message
+    account.updated_at = shanghai_now()
+    return message
+
+
+def _fail_rednote_collection(
+    db: Session,
+    account: PlatformAccount,
+    task: Task,
+    exc: RednoteAccountError,
+    details: dict[str, Any] | None = None,
+) -> str:
+    message = _apply_rednote_collection_failure(account, exc)
+    _fail_task(db, task, message, details)
+    return message
 
 
 @router.post("/search-notes")
@@ -266,25 +374,70 @@ def crawl_note_urls(
     db: Session = Depends(get_db),
     adapter_factory=Depends(get_xhs_pc_api_adapter_factory),
 ):
-    account = _owned_pc_account(db, current_user, payload.account_id)
-    cookies = _get_owned_pc_account_cookies(db, current_user, payload.account_id)
+    allowed_sub_types = ("pc", "rednote_pc")
+    account = _owned_pc_account(db, current_user, payload.account_id, allowed_sub_types)
+    if account.sub_type == "rednote_pc" and payload.fetch_comments:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Rednote collection does not support comments",
+        )
+    cookies = _get_owned_pc_account_cookies(
+        db, current_user, payload.account_id, allowed_sub_types
+    )
     task = _create_crawl_task(
         db,
         current_user,
         "note_urls",
         {"account_id": account.id, "url_count": len(payload.urls)},
     )
-    adapter = adapter_factory(cookies)
+    adapter = _collection_adapter(account, cookies, adapter_factory)
     normalized_items: list[dict[str, Any]] = []
+    saved_notes: list[Note] = []
     errors: list[dict[str, str]] = []
-    for url in payload.urls:
-        success, message, raw_payload = adapter.get_note_info(url)
-        if success:
-            normalized_items.append(_normalize_detail_payload(raw_payload or {}))
-        else:
-            errors.append({"url": url, "error": message or "XHS note detail crawl failed"})
+    try:
+        for url in payload.urls:
+            success, message, raw_payload = adapter.get_note_info(url)
+            if success:
+                normalized = _normalize_detail_payload(
+                    raw_payload or {},
+                    source_url=url if account.sub_type == "rednote_pc" else "",
+                )
+                normalized_items.append(normalized)
+                if account.sub_type == "rednote_pc" and payload.save_to_library:
+                    saved_notes.extend(
+                        _save_normalized_notes(
+                            db,
+                            account,
+                            [normalized],
+                            download_assets=False,
+                        )
+                    )
+            else:
+                errors.append({"url": url, "error": message or "XHS note detail crawl failed"})
+    except RednoteAccountError as exc:
+        public_message = _fail_rednote_collection(
+            db,
+            account,
+            task,
+            exc,
+            {
+                "result_count": len(normalized_items),
+                "saved_count": len(saved_notes),
+                "errors": errors,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=public_message,
+        ) from exc
 
-    saved_notes = _save_normalized_notes(db, account, normalized_items) if payload.save_to_library else []
+    if payload.save_to_library and account.sub_type != "rednote_pc":
+        saved_notes = _save_normalized_notes(
+            db,
+            account,
+            normalized_items,
+            download_assets=True,
+        )
     task = _complete_task(
         db,
         task,
@@ -306,21 +459,54 @@ def crawl_user_notes(
     db: Session = Depends(get_db),
     adapter_factory=Depends(get_xhs_pc_api_adapter_factory),
 ):
-    account = _owned_pc_account(db, current_user, payload.account_id)
-    cookies = _get_owned_pc_account_cookies(db, current_user, payload.account_id)
+    allowed_sub_types = ("pc", "rednote_pc")
+    account = _owned_pc_account(db, current_user, payload.account_id, allowed_sub_types)
+    cookies = _get_owned_pc_account_cookies(
+        db, current_user, payload.account_id, allowed_sub_types
+    )
     task = _create_crawl_task(
         db,
         current_user,
         "user_notes",
         {"account_id": account.id, "user_url": payload.user_url},
     )
-    success, message, raw_payload = adapter_factory(cookies).get_user_notes(payload.user_url)
+    try:
+        success, message, raw_payload = _collection_adapter(
+            account, cookies, adapter_factory
+        ).get_user_notes(payload.user_url)
+    except RednoteAccountError as exc:
+        public_message = _fail_rednote_collection(db, account, task, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=public_message,
+        ) from exc
     if not success:
         _fail_task(db, task, message or "XHS user notes crawl failed")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=message or "XHS user notes crawl failed")
 
-    normalized_items = [_normalize_search_item(item) for item in _data_items(raw_payload)]
-    saved_notes = _save_normalized_notes(db, account, normalized_items) if payload.save_to_library else []
+    frontend_origin = (
+        "https://www.rednote.com"
+        if account.sub_type == "rednote_pc"
+        else "https://www.xiaohongshu.com"
+    )
+    normalized_items = [
+        _normalize_search_item(
+            item,
+            frontend_origin,
+            allow_response_urls=account.sub_type != "rednote_pc",
+        )
+        for item in _data_items(raw_payload)
+    ]
+    saved_notes = (
+        _save_normalized_notes(
+            db,
+            account,
+            normalized_items,
+            download_assets=account.sub_type != "rednote_pc",
+        )
+        if payload.save_to_library
+        else []
+    )
     task = _complete_task(
         db,
         task,
@@ -346,8 +532,18 @@ def crawl_data(
     db: Session = Depends(get_db),
     adapter_factory=Depends(get_xhs_pc_api_adapter_factory),
 ):
-    account = _owned_pc_account(db, current_user, payload.account_id)
-    cookies = _get_owned_pc_account_cookies(db, current_user, payload.account_id)
+    allowed_sub_types = ("pc", "rednote_pc")
+    account = _owned_pc_account(db, current_user, payload.account_id, allowed_sub_types)
+    if account.sub_type == "rednote_pc" and (
+        payload.mode != "note_urls" or payload.fetch_comments
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Rednote collection currently supports note URLs without comments",
+        )
+    cookies = _get_owned_pc_account_cookies(
+        db, current_user, payload.account_id, allowed_sub_types
+    )
     task = _create_crawl_task(
         db,
         current_user,
@@ -362,21 +558,35 @@ def crawl_data(
         },
     )
     task_id = task.id
-    adapter = adapter_factory(cookies)
+    adapter = _collection_adapter(account, cookies, adapter_factory)
 
     def generate() -> Generator[str, None, None]:
         items: list[dict[str, Any]] = []
-        normalized_for_save: list[dict[str, Any]] = []
+        saved_count = 0
         error_occurred = False
+        terminal_error = ""
 
         try:
             if payload.mode == "note_urls":
                 for index, url in enumerate(payload.urls):
                     success, message, raw_payload = adapter.get_note_info(url)
                     if success:
-                        note = _normalize_detail_payload(raw_payload or {})
+                        note = _normalize_detail_payload(
+                            raw_payload or {},
+                            source_url=(
+                                url if account.sub_type == "rednote_pc" else ""
+                            ),
+                        )
                         note["note_url"] = note.get("note_url") or url
-                        normalized_for_save.append(note)
+                        if account.sub_type == "rednote_pc":
+                            saved_count += len(
+                                _save_normalized_notes(
+                                    db,
+                                    account,
+                                    [note],
+                                    download_assets=False,
+                                )
+                            )
                         comments_list: list[dict[str, Any]] = []
                         if payload.fetch_comments:
                             cs, cm, cp = adapter.get_note_comments(url)
@@ -461,7 +671,6 @@ def crawl_data(
                                 yield _sse_event({"type": "item", "index": len(items) - 1, "item": item})
                                 _sleep_between_requests(payload.time_sleep)
                                 continue
-                        normalized_for_save.append(detail_note)
                         item = _crawl_data_item(source=source, status="success", note=detail_note, comments=comments_list)
                         items.append(item)
                         yield _sse_event({"type": "item", "index": len(items) - 1, "item": item})
@@ -472,26 +681,49 @@ def crawl_data(
                     if not data.get("has_more", False):
                         break
 
-        except Exception as exc:
+        except RednoteAccountError as exc:
             error_occurred = True
-            yield _sse_event({"type": "error", "message": str(exc)})
+            db.rollback()
+            terminal_error = _apply_rednote_collection_failure(account, exc)
+        except Exception:
+            error_occurred = True
+            db.rollback()
+            terminal_error = "Collection stopped because of an internal error"
 
         success_count = len([i for i in items if i["status"] == "success"])
         failed_count = len(items) - success_count
-        try:
-            if error_occurred:
-                _fail_task(db, task, "partial failure")
-            else:
-                _complete_task(db, task, {"result_count": success_count, "failed_count": failed_count})
-        except Exception:
-            pass
+        if error_occurred:
+            _fail_task(
+                db,
+                task,
+                terminal_error or "partial failure",
+                {
+                    "result_count": success_count,
+                    "saved_count": saved_count,
+                    "failed_count": failed_count,
+                },
+            )
+            yield _sse_event({"type": "error", "message": terminal_error})
+        else:
+            _complete_task(
+                db,
+                task,
+                {
+                    "result_count": success_count,
+                    "saved_count": saved_count,
+                    "failed_count": failed_count,
+                },
+            )
 
         yield _sse_event({
             "type": "done",
+            "status": "failed" if error_occurred else "completed",
             "task_id": task_id,
             "total": len(items),
             "success_count": success_count,
+            "saved_count": saved_count,
             "failed_count": failed_count,
+            "terminal_error": terminal_error or None,
         })
 
     return StreamingResponse(generate(), media_type="text/event-stream")

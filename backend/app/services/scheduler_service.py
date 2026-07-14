@@ -432,6 +432,24 @@ def _scheduler_cookies_to_string(value: str) -> str:
     return stripped
 
 
+def _owned_active_auto_task_account(
+    db: Session,
+    task: AutoTask,
+    account_id: int,
+    expected_sub_type: str,
+) -> PlatformAccount | None:
+    account = db.get(PlatformAccount, account_id)
+    if (
+        account is None
+        or account.user_id != task.user_id
+        or account.platform != "xhs"
+        or account.sub_type != expected_sub_type
+        or account.status != "active"
+    ):
+        return None
+    return account
+
+
 def _execute_auto_task_background(db: Session, task: AutoTask) -> None:
     """Simplified auto-task execution for background scheduler."""
     import random
@@ -442,8 +460,19 @@ def _execute_auto_task_background(db: Session, task: AutoTask) -> None:
     from backend.app.services.ai_service import OpenAICompatibleTextClient
 
     # Get PC cookies
-    account = db.get(PlatformAccount, task.pc_account_id)
-    if not account:
+    account = _owned_active_auto_task_account(
+        db,
+        task,
+        task.pc_account_id,
+        "pc",
+    )
+    creator_account = _owned_active_auto_task_account(
+        db,
+        task,
+        task.creator_account_id,
+        "creator",
+    )
+    if account is None or creator_account is None:
         return
     cookie_version = db.scalars(
         select(AccountCookieVersion)
@@ -517,9 +546,6 @@ def _execute_auto_task_background(db: Session, task: AutoTask) -> None:
         pass
 
     # Get Creator cookies
-    creator_account = db.get(PlatformAccount, task.creator_account_id)
-    if not creator_account:
-        return
     creator_cv = db.scalars(
         select(AccountCookieVersion)
         .where(AccountCookieVersion.platform_account_id == creator_account.id)
@@ -636,6 +662,12 @@ def _check_single_account(db: Session, account: PlatformAccount, now: datetime) 
     """Check one account's cookie validity. Returns the new status."""
     from backend.app.adapters.xhs.pc_login_adapter import XhsPcLoginAdapter
     from backend.app.adapters.xhs.creator_login_adapter import XhsCreatorLoginAdapter
+    from backend.app.adapters.xhs.rednote_account_adapter import (
+        RednoteAccountError,
+        RednotePcAccountAdapter,
+        RednoteRequestUnavailableError,
+        RednoteVerificationRequiredError,
+    )
     from backend.app.services.account_service import decode_cookie_text
 
     cookie_version = db.scalars(
@@ -649,19 +681,58 @@ def _check_single_account(db: Session, account: PlatformAccount, now: datetime) 
         account.updated_at = now
         return "expired"
 
-    adapter = XhsCreatorLoginAdapter() if account.sub_type == "creator" else XhsPcLoginAdapter()
+    adapters = {
+        "pc": XhsPcLoginAdapter,
+        "creator": XhsCreatorLoginAdapter,
+        "rednote_pc": RednotePcAccountAdapter,
+    }
     try:
+        adapter_type = adapters.get(account.sub_type or "pc")
+        if adapter_type is None:
+            raise RuntimeError(f"Unsupported account subtype: {account.sub_type}")
+        adapter = adapter_type()
         cookies_text = decrypt_text(cookie_version.encrypted_cookies)
-        adapter.get_user_info(decode_cookie_text(cookies_text))
+        user_info = adapter.get_user_info(decode_cookie_text(cookies_text))
         old_status = account.status
+        if account.sub_type == "rednote_pc":
+            refreshed_external_user_id = str(user_info.get("external_user_id") or "")
+            if not account.external_user_id or not refreshed_external_user_id or (
+                refreshed_external_user_id != account.external_user_id
+            ):
+                account.status = "risk"
+                account.status_message = "Authenticated identity changed; account was not rebound"
+                account.updated_at = now
+                return old_status
         account.status = "active"
         account.status_message = ""
         account.updated_at = now
         return old_status
-    except Exception as exc:
+    except RednoteVerificationRequiredError:
+        old_status = account.status
+        account.status = "risk"
+        account.status_message = "Rednote requires interactive verification"
+        account.updated_at = now
+        return old_status
+    except RednoteRequestUnavailableError:
+        old_status = account.status
+        account.status = "unknown"
+        account.status_message = "Rednote health check is temporarily unavailable"
+        account.updated_at = now
+        return old_status
+    except RednoteAccountError:
         old_status = account.status
         account.status = "expired"
-        account.status_message = str(exc)
+        account.status_message = "Rednote session is invalid or expired"
+        account.updated_at = now
+        return old_status
+    except Exception as exc:
+        old_status = account.status
+        if account.sub_type == "rednote_pc":
+            account.status = "unknown"
+            account.status_message = "Rednote health check is temporarily unavailable"
+        else:
+            account.status = "expired"
+            account.status_message = str(exc)
         account.updated_at = now
         return old_status
 

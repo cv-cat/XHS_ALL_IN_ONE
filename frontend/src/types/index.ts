@@ -48,7 +48,7 @@ export type AuthPayload = AuthTokens & {
 export type PlatformAccount = {
   id: number;
   platform: PlatformId;
-  sub_type: "pc" | "creator" | null;
+  sub_type: "pc" | "creator" | "rednote_pc" | null;
   external_user_id?: string;
   nickname: string;
   avatar_url?: string;
@@ -146,6 +146,20 @@ export type XhsDataCrawlResponse = {
   success_count: number;
   failed_count: number;
   items: XhsDataCrawlItem[];
+};
+
+export type XhsUserNotesCrawlPayload = {
+  account_id: number;
+  user_url: string;
+  save_to_library?: boolean;
+};
+
+export type XhsUserNotesCrawlResponse = {
+  task: TaskRecord;
+  result_count: number;
+  saved_count: number;
+  items: SavedNote[];
+  raw: unknown;
 };
 
 export type SavedNote = {

@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime, timedelta
 
@@ -64,6 +65,44 @@ def test_accounts_page_uses_antd_components_and_shows_check_state():
     assert "antd" in source
     assert "checkingAccountIds" in source or "checkingId" in source or "isChecking" in source
     assert "检查" in source
+
+
+def test_rednote_account_binding_ui_is_cookie_only_and_requires_expected_identity():
+    drawer = open("frontend/src/components/account/add-account-drawer.tsx", encoding="utf-8").read()
+    cookie_panel = open("frontend/src/components/account/cookie-import-panel.tsx", encoding="utf-8").read()
+    api_client = open("frontend/src/lib/api.ts", encoding="utf-8").read()
+
+    assert 'value: "rednote_pc"' in drawer
+    assert 'accountType === "rednote_pc"' in drawer
+    assert 'option.value === "cookie"' in drawer
+    assert "expectedExternalUserId" in cookie_panel
+    assert "expected_external_user_id" in cookie_panel
+    assert "response?.data?.detail" in cookie_panel
+    assert "Rednote account validation is temporarily unavailable" not in cookie_panel
+    assert '"pc" | "creator" | "rednote_pc"' in api_client
+
+
+def test_rednote_account_is_available_in_crawler_with_explicit_capability_limits():
+    crawler = open(
+        "frontend/src/pages/platforms/xhs/crawler-page.tsx", encoding="utf-8"
+    ).read()
+    cookie_panel = open(
+        "frontend/src/components/account/cookie-import-panel.tsx", encoding="utf-8"
+    ).read()
+    api_client = open("frontend/src/lib/api.ts", encoding="utf-8").read()
+
+    assert 'a.sub_type === "pc" || a.sub_type === "rednote_pc"' in crawler
+    assert 'selectedAccount?.sub_type === "rednote_pc"' in crawler
+    assert 'value: "profile_notes", label: "采集公开主页笔记列表"' in crawler
+    assert 'value: "note_urls", label: "采集单篇 Rednote 笔记详情"' in crawler
+    assert "crawlXhsUserNotes" in crawler
+    assert "Rednote 采集账号当前只支持公开主页笔记列表和单篇笔记详情" in crawler
+    assert "搜索、评论、监控与发布仍未开放" in crawler
+    assert "保存到内容库" in crawler
+    assert 'note_url.startsWith("https://www.rednote.com/")' in crawler
+    assert "公开主页笔记列表和单篇笔记详情采集" in cookie_panel
+    assert "不支持二维码、短信登录、搜索、评论、监控或发布" in cookie_panel
+    assert '"/xhs/crawl/user-notes"' in api_client
 
 
 def test_xhs_direct_request_env_temporarily_removes_proxy_variables(monkeypatch):
@@ -1016,13 +1055,15 @@ def test_accounts_list_requires_platform_login(tmp_path):
 class FakeCookieAccountAdapter:
     def __init__(self):
         self.calls = 0
+        self.external_user_id = "cookie-user-1"
+        self.nickname = "cookie-cat"
 
     def get_user_info(self, cookies):
         self.calls += 1
         assert cookies["a1"] == "cookie-a1"
         return {
-            "external_user_id": "cookie-user-1",
-            "nickname": "cookie-cat",
+            "external_user_id": self.external_user_id,
+            "nickname": self.nickname,
             "avatar_url": "https://example.test/cookie-avatar.webp",
         }
 
@@ -1053,13 +1094,22 @@ class FakeSelfProfileAdapter:
         }
 
 
+class FakeUnavailableSelfProfileAdapter:
+    def get_self_profile(self, cookies_text):
+        raise RuntimeError("self profile unavailable")
+
+
 class FailingCookieAccountAdapter:
     def get_user_info(self, cookies):
         raise RuntimeError("expired")
 
 
 def test_account_cookie_import_creates_account_and_health_check_updates_status(tmp_path):
-    from backend.app.api.accounts import get_creator_account_adapter, get_pc_account_adapter
+    from backend.app.api.accounts import (
+        get_creator_account_adapter,
+        get_pc_account_adapter,
+        get_xhs_self_profile_adapter,
+    )
     from backend.app.core.database import get_db
     from backend.app.core.security import decrypt_text
     from backend.app.core.time import shanghai_now
@@ -1069,6 +1119,7 @@ def test_account_cookie_import_creates_account_and_health_check_updates_status(t
     fake_adapter = FakeCookieAccountAdapter()
     app.dependency_overrides[get_pc_account_adapter] = lambda: fake_adapter
     app.dependency_overrides[get_creator_account_adapter] = lambda: FailingCreatorExchangeAdapter()
+    app.dependency_overrides[get_xhs_self_profile_adapter] = lambda: FakeUnavailableSelfProfileAdapter()
     try:
         access_token = _register_and_get_access_token("cookie-operator")
         before_create = shanghai_now()
@@ -1076,7 +1127,11 @@ def test_account_cookie_import_creates_account_and_health_check_updates_status(t
         import_response = client.post(
             "/api/accounts/import-cookie",
             headers={"Authorization": f"Bearer {access_token}"},
-            json={"platform": "xhs", "sub_type": "pc", "cookie_string": "a1=cookie-a1; web_session=session"},
+            json={
+                "platform": "xhs",
+                "sub_type": "pc",
+                "cookie_string": "a1=cookie-a1; web_session=session",
+            },
         )
         after_create = shanghai_now()
         assert import_response.status_code == 200
@@ -1103,6 +1158,8 @@ def test_account_cookie_import_creates_account_and_health_check_updates_status(t
         assert accounts_response.status_code == 200
         assert accounts_response.json()["total"] == 1
 
+        fake_adapter.external_user_id = "cookie-user-2"
+        fake_adapter.nickname = "cookie-cat-updated"
         check_response = client.post(
             f"/api/accounts/{imported['id']}/check",
             headers={"Authorization": f"Bearer {access_token}"},
@@ -1110,12 +1167,14 @@ def test_account_cookie_import_creates_account_and_health_check_updates_status(t
         assert check_response.status_code == 200
         checked = check_response.json()
         assert checked["status"] == "active"
-        assert checked["nickname"] == "cookie-cat"
+        assert checked["external_user_id"] == "cookie-user-2"
+        assert checked["nickname"] == "cookie-cat-updated"
         assert fake_adapter.calls >= 2
     finally:
         app.dependency_overrides.pop(db_dependency, None)
         app.dependency_overrides.pop(get_pc_account_adapter, None)
         app.dependency_overrides.pop(get_creator_account_adapter, None)
+        app.dependency_overrides.pop(get_xhs_self_profile_adapter, None)
 
 
 def test_account_cookie_import_for_pc_can_optionally_sync_creator_account(tmp_path):
@@ -1215,6 +1274,86 @@ def test_account_check_refreshes_xhs_self_profile_metrics(tmp_path):
         app.dependency_overrides.pop(get_xhs_self_profile_adapter, None)
 
 
+def test_creator_account_check_keeps_optional_xhs_self_profile_enrichment(
+    tmp_path, monkeypatch
+):
+    import apis.xhs_creator_apis as creator_api_module
+    from backend.app.api.accounts import (
+        get_creator_account_adapter,
+        get_xhs_self_profile_adapter,
+    )
+
+    class FakeCreatorHealthAdapter:
+        def get_user_info(self, cookies):
+            assert cookies == {
+                "web_session": "creator-session",
+                "a1": "creator-a1",
+            }
+            return {
+                "external_user_id": "creator-user",
+                "nickname": "creator-adapter-name",
+                "avatar_url": "https://example.test/creator-adapter.webp",
+            }
+
+    class FakeCreatorUploadApi:
+        def get_fileIds(self, asset_type, cookies):
+            assert asset_type == "image"
+            assert cookies == {
+                "web_session": "creator-session",
+                "a1": "creator-a1",
+            }
+            return True, "ok", {}
+
+    FakeSelfProfileAdapter.calls = []
+    monkeypatch.setattr(
+        creator_api_module,
+        "XHS_Creator_Apis",
+        FakeCreatorUploadApi,
+    )
+    db_dependency, owner_token, account_id = _create_creator_account_with_cookie(
+        tmp_path,
+        "creator-self-profile-owner",
+    )
+    app.dependency_overrides[get_creator_account_adapter] = (
+        lambda: FakeCreatorHealthAdapter()
+    )
+    app.dependency_overrides[get_xhs_self_profile_adapter] = (
+        lambda: FakeSelfProfileAdapter()
+    )
+    try:
+        response = client.post(
+            f"/api/accounts/{account_id}/check",
+            headers={"Authorization": f"Bearer {owner_token}"},
+        )
+
+        assert response.status_code == 200
+        checked = response.json()
+        assert checked["status"] == "active"
+        assert checked["nickname"] == "cookie-cat-live"
+        assert checked["avatar_url"] == "https://example.test/live-avatar.webp"
+        assert checked["profile"]["followers"] == "90"
+        assert len(FakeSelfProfileAdapter.calls) == 1
+        assert set(FakeSelfProfileAdapter.calls[0].split("; ")) == {
+            "web_session=creator-session",
+            "a1=creator-a1",
+        }
+
+        app.dependency_overrides[get_xhs_self_profile_adapter] = (
+            lambda: FakeUnavailableSelfProfileAdapter()
+        )
+        fallback_response = client.post(
+            f"/api/accounts/{account_id}/check",
+            headers={"Authorization": f"Bearer {owner_token}"},
+        )
+        assert fallback_response.status_code == 200
+        assert fallback_response.json()["status"] == "active"
+        assert fallback_response.json()["nickname"] == "creator-adapter-name"
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+        app.dependency_overrides.pop(get_creator_account_adapter, None)
+        app.dependency_overrides.pop(get_xhs_self_profile_adapter, None)
+
+
 def test_account_check_enforces_ownership_and_marks_expired_on_adapter_failure(tmp_path):
     from backend.app.api.accounts import get_pc_account_adapter
 
@@ -1250,6 +1389,1302 @@ def test_account_check_enforces_ownership_and_marks_expired_on_adapter_failure(t
     finally:
         app.dependency_overrides.pop(db_dependency, None)
         app.dependency_overrides.pop(get_pc_account_adapter, None)
+
+
+class FakeRednoteAccountAdapter:
+    def __init__(self):
+        self.calls = 0
+        self.external_user_id = "rednote-user-1"
+        self.nickname = "rednote-cookie-cat"
+
+    def get_user_info(self, cookies):
+        self.calls += 1
+        assert cookies == {"a1": "rednote-a1", "web_session": "rednote-session"}
+        return {
+            "external_user_id": self.external_user_id,
+            "nickname": self.nickname,
+            "avatar_url": "https://example.test/rednote-avatar.webp",
+            "profile": {"site": "rednote", "red_id": "rednote-id-1"},
+        }
+
+
+def test_rednote_adapter_uses_rednote_hosts_and_minimizes_stored_profile(tmp_path, monkeypatch):
+    import backend.app.adapters.xhs.rednote_account_adapter as rednote_module
+    from backend.app.core.database import get_db
+    from backend.app.services.account_service import serialize_account, upsert_platform_account_from_login
+
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_generate_headers(a1, api, data="", method="POST"):
+        assert a1 == "fixture-a1"
+        assert method == "GET"
+        return {"x-s": f"signed:{api}"}, data
+
+    class FakeSession:
+        trust_env = True
+
+        def get(self, url, *, headers, cookies, timeout, allow_redirects):
+            calls.append(
+                {
+                    "url": url,
+                    "headers": headers,
+                    "cookies": cookies,
+                    "timeout": timeout,
+                    "allow_redirects": allow_redirects,
+                }
+            )
+            if url.endswith("/api/sns/web/v2/user/me"):
+                return FakeResponse(
+                    {
+                        "success": True,
+                        "data": {
+                            "user_id": "rednote-user-1",
+                            "nickname": "rednote-cookie-cat",
+                            "guest": False,
+                        },
+                    },
+                )
+            return FakeResponse(
+                {
+                    "success": True,
+                    "data": {
+                        "basic_info": {
+                            "nickname": "rednote-cookie-cat",
+                            "red_id": "rednote-id-1",
+                            "ip_location": "synthetic-private-location",
+                        },
+                        "interactions": [{"type": "fans", "count": "42"}],
+                        "extra_private_field": "must-not-be-retained",
+                    },
+                }
+            )
+
+    fake_session = FakeSession()
+
+    monkeypatch.setattr(rednote_module, "generate_headers", fake_generate_headers)
+    monkeypatch.setattr(rednote_module.requests, "Session", lambda: fake_session)
+
+    user_info = rednote_module.RednotePcAccountAdapter().get_user_info(
+        {"a1": "fixture-a1", "web_session": "fixture-session"}
+    )
+
+    assert [call["url"] for call in calls] == [
+        "https://webapi.rednote.com/api/sns/web/v2/user/me",
+        "https://webapi.rednote.com/api/sns/web/v1/user/selfinfo",
+    ]
+    assert all("xiaohongshu.com" not in call["url"] for call in calls)
+    assert all(call["headers"]["origin"] == "https://www.rednote.com" for call in calls)
+    assert all(call["headers"]["referer"] == "https://www.rednote.com/" for call in calls)
+    assert all(call["headers"]["sec-ch-ua-platform"] == '"macOS"' for call in calls)
+    assert all('"Google Chrome";v="145"' in call["headers"]["sec-ch-ua"] for call in calls)
+    assert all("Chrome/145" in call["headers"]["user-agent"] for call in calls)
+    assert all(call["cookies"] == {"a1": "fixture-a1", "web_session": "fixture-session"} for call in calls)
+    assert all(call["timeout"] == rednote_module.REQUEST_TIMEOUT for call in calls)
+    assert all(call["allow_redirects"] is False for call in calls)
+    assert fake_session.trust_env is False
+    assert user_info["external_user_id"] == "rednote-user-1"
+    assert user_info["profile"]["site"] == "rednote"
+    assert user_info["profile"]["followers"] == "42"
+    assert "raw" not in user_info["profile"]
+    assert "ip_location" not in user_info["profile"]
+
+    db_dependency = _override_database(tmp_path)
+    db = next(app.dependency_overrides[get_db]())
+    try:
+        account, _ = upsert_platform_account_from_login(
+            db=db,
+            user_id=1,
+            platform="xhs",
+            sub_type="rednote_pc",
+            user_info=user_info,
+            cookies_text="a1=fixture-a1; web_session=fixture-session",
+        )
+        db.commit()
+        db.refresh(account)
+        serialized = serialize_account(account)
+        assert "raw" not in serialized["profile"]
+        assert "ip_location" not in serialized["profile"]
+        assert "synthetic-private-location" not in account.profile_json
+    finally:
+        db.close()
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_rednote_collection_adapter_uses_request_local_rednote_transport(monkeypatch):
+    import backend.app.adapters.xhs.rednote_pc_api_adapter as rednote_module
+
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "success": True,
+                "msg": "ok",
+                "data": {
+                    "notes": [{"note_card": {"note_id": "rednote-list-001"}}],
+                    "cursor": "",
+                    "has_more": False,
+                },
+            }
+
+    class FakeSession:
+        trust_env = True
+
+        def get(self, url, *, headers, cookies, timeout, allow_redirects):
+            calls.append(
+                {
+                    "url": url,
+                    "headers": headers,
+                    "cookies": cookies,
+                    "allow_redirects": allow_redirects,
+                }
+            )
+            return FakeResponse()
+
+    fake_session = FakeSession()
+
+    def fake_generate_headers(a1, api, data="", method="POST"):
+        assert a1 == "fixture-a1"
+        assert method == "GET"
+        return {"x-s": "fixture-signature"}, data
+
+    monkeypatch.setattr(rednote_module.requests, "Session", lambda: fake_session)
+    monkeypatch.setattr(rednote_module, "generate_headers", fake_generate_headers)
+
+    adapter = rednote_module.RednotePcApiAdapter(
+        "a1=fixture-a1; web_session=fixture-session"
+    )
+    success, message, notes = adapter.get_user_notes(
+        "https://www.rednote.com/user/profile/public-fixture"
+    )
+
+    assert success is True
+    assert message == "ok"
+    assert notes[0]["note_card"]["note_id"] == "rednote-list-001"
+    assert len(calls) == 1
+    assert calls[0]["url"].startswith("https://webapi.rednote.com/api/sns/web/v1/user_posted?")
+    assert "xiaohongshu.com" not in calls[0]["url"]
+    assert calls[0]["headers"]["origin"] == "https://www.rednote.com"
+    assert calls[0]["headers"]["referer"] == "https://www.rednote.com/"
+    assert calls[0]["cookies"] == {
+        "a1": "fixture-a1",
+        "web_session": "fixture-session",
+    }
+    assert calls[0]["allow_redirects"] is False
+    assert fake_session.trust_env is False
+
+    rejected = adapter.get_user_notes(
+        "https://www.xiaohongshu.com/user/profile/wrong-site"
+    )
+    assert rejected == (False, "A Rednote profile URL is required", None)
+    rejected_subdomain = adapter.get_user_notes(
+        "https://attacker.rednote.com/user/profile/wrong-host"
+    )
+    assert rejected_subdomain == (
+        False,
+        "A Rednote profile URL is required",
+        None,
+    )
+    rejected_extra_path = adapter.get_user_notes(
+        "https://www.rednote.com/user/profile/public-fixture/extra"
+    )
+    assert rejected_extra_path == (
+        False,
+        "A Rednote profile URL is required",
+        None,
+    )
+    assert len(calls) == 1
+
+
+def test_rednote_collection_adapter_posts_note_details_only_to_rednote(monkeypatch):
+    import backend.app.adapters.xhs.rednote_pc_api_adapter as rednote_module
+
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class FakeSession:
+        trust_env = True
+        payload = {
+            "success": True,
+            "msg": "ok",
+            "data": {
+                "items": [
+                    {"note_card": {"note_id": "different-note"}},
+                    {"note_card": {"note_id": "rednote-detail-001"}},
+                ]
+            },
+        }
+
+        def post(self, url, *, headers, data, cookies, timeout, allow_redirects):
+            calls.append(
+                {
+                    "url": url,
+                    "headers": headers,
+                    "data": data,
+                    "cookies": cookies,
+                    "allow_redirects": allow_redirects,
+                }
+            )
+            return FakeResponse(self.payload)
+
+    fake_session = FakeSession()
+
+    def fake_generate_headers(a1, api, data="", method="POST"):
+        assert a1 == "fixture-a1"
+        assert api == "/api/sns/web/v1/feed"
+        assert method == "POST"
+        assert data["source_note_id"] in {
+            "rednote-detail-001",
+            "rednote-empty-001",
+            "rednote-mismatch-001",
+        }
+        return {"x-s": "fixture-signature"}, "encoded-fixture-body"
+
+    def fake_generate_x_rap_param(api, data):
+        assert api == "/api/sns/web/v1/feed"
+        assert data == "encoded-fixture-body"
+        return "fixture-rap"
+
+    monkeypatch.setattr(rednote_module.requests, "Session", lambda: fake_session)
+    monkeypatch.setattr(rednote_module, "generate_headers", fake_generate_headers)
+    monkeypatch.setattr(
+        rednote_module, "generate_x_rap_param", fake_generate_x_rap_param
+    )
+
+    adapter = rednote_module.RednotePcApiAdapter(
+        "a1=fixture-a1; web_session=fixture-session"
+    )
+    success, message, payload = adapter.get_note_info(
+        "https://www.rednote.com/explore/rednote-detail-001"
+    )
+
+    assert success is True
+    assert message == "ok"
+    assert payload["data"]["items"][0]["note_card"]["note_id"] == (
+        "rednote-detail-001"
+    )
+    assert len(payload["data"]["items"]) == 1
+    assert calls == [
+        {
+            "url": "https://webapi.rednote.com/api/sns/web/v1/feed",
+            "headers": {
+                "x-s": "fixture-signature",
+                "authority": "webapi.rednote.com",
+                "origin": "https://www.rednote.com",
+                "referer": "https://www.rednote.com/",
+                "accept-language": "en-GB,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+                "sec-ch-ua": (
+                    '"Not_A Brand";v="99", "Chromium";v="145", '
+                    '"Google Chrome";v="145"'
+                ),
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"macOS"',
+                "sec-fetch-site": "same-site",
+                "user-agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/145.0.0.0 Safari/537.36"
+                ),
+                "x-rap-param": "fixture-rap",
+                "xy-direction": "13",
+            },
+            "data": "encoded-fixture-body",
+            "cookies": {
+                "a1": "fixture-a1",
+                "web_session": "fixture-session",
+            },
+            "allow_redirects": False,
+        }
+    ]
+    assert fake_session.trust_env is False
+
+    fake_session.payload = {"success": True, "msg": "ok", "data": {"items": []}}
+    empty = adapter.get_note_info(
+        "https://www.rednote.com/explore/rednote-empty-001"
+    )
+    assert empty == (
+        False,
+        "Rednote note response did not match the requested note",
+        None,
+    )
+    assert len(calls) == 2
+
+    fake_session.payload = {
+        "success": True,
+        "msg": "ok",
+        "data": {"items": [{"note_card": {"note_id": "different-note"}}]},
+    }
+    mismatch = adapter.get_note_info(
+        "https://www.rednote.com/explore/rednote-mismatch-001"
+    )
+    assert mismatch == (
+        False,
+        "Rednote note response did not match the requested note",
+        None,
+    )
+    assert len(calls) == 3
+
+    rejected = adapter.get_note_info(
+        "https://www.xiaohongshu.com/explore/wrong-site"
+    )
+    assert rejected == (False, "A Rednote note URL is required", None)
+    assert len(calls) == 3
+
+
+def test_rednote_adapter_rejects_incomplete_cookie_before_network(monkeypatch):
+    import backend.app.adapters.xhs.rednote_account_adapter as rednote_module
+
+    class UnexpectedSession:
+        trust_env = True
+
+        def get(self, *args, **kwargs):
+            raise AssertionError("network must not be called")
+
+    monkeypatch.setattr(rednote_module.requests, "Session", UnexpectedSession)
+
+    try:
+        rednote_module.RednotePcAccountAdapter().get_user_info({"a1": "fixture-a1"})
+    except RuntimeError as exc:
+        assert str(exc) == "Rednote session is missing required cookies"
+    else:
+        raise AssertionError("incomplete Rednote Cookie should be rejected")
+
+
+def test_rednote_account_adapter_classifies_signing_failure_as_temporary(
+    monkeypatch,
+):
+    import backend.app.adapters.xhs.rednote_account_adapter as rednote_module
+
+    class UnexpectedSession:
+        trust_env = True
+
+        def get(self, *args, **kwargs):
+            raise AssertionError("network must not be called")
+
+    def failed_signing(*args, **kwargs):
+        raise RuntimeError("private signer failure")
+
+    monkeypatch.setattr(rednote_module.requests, "Session", UnexpectedSession)
+    monkeypatch.setattr(rednote_module, "generate_headers", failed_signing)
+
+    try:
+        rednote_module.RednotePcAccountAdapter().get_user_info(
+            {"a1": "fixture-a1", "web_session": "fixture-session"}
+        )
+    except rednote_module.RednoteRequestUnavailableError as exc:
+        assert str(exc) == "Rednote account request signing is temporarily unavailable"
+        assert "private signer failure" not in str(exc)
+    else:
+        raise AssertionError("signing failure should be classified as temporary")
+
+
+def test_rednote_adapter_classifies_verification_without_exposing_response(monkeypatch):
+    import backend.app.adapters.xhs.rednote_account_adapter as rednote_module
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"success": False, "msg": "captcha verification required", "private": "ignored"}
+
+    monkeypatch.setattr(
+        rednote_module,
+        "generate_headers",
+        lambda a1, api, data="", method="POST": ({"x-s": "fixture-signature"}, data),
+    )
+    class FakeSession:
+        trust_env = True
+
+        def get(self, *args, **kwargs):
+            assert kwargs["allow_redirects"] is False
+            return FakeResponse()
+
+    monkeypatch.setattr(rednote_module.requests, "Session", FakeSession)
+
+    try:
+        rednote_module.RednotePcAccountAdapter().get_user_info(
+            {"a1": "fixture-a1", "web_session": "fixture-session"}
+        )
+    except rednote_module.RednoteVerificationRequiredError as exc:
+        assert str(exc) == "Rednote session requires verification"
+        assert "private" not in str(exc)
+    else:
+        raise AssertionError("verification response should fail closed")
+
+
+def test_rednote_account_adapter_classifies_real_failure_responses_conservatively(
+    monkeypatch,
+):
+    import backend.app.adapters.xhs.rednote_account_adapter as rednote_module
+
+    class FakeResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self.payload = payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise requests.HTTPError("private HTTP response detail")
+
+        def json(self):
+            return self.payload
+
+    class FakeSession:
+        trust_env = True
+
+        def __init__(self, response):
+            self.response = response
+
+        def get(self, *args, **kwargs):
+            assert kwargs["allow_redirects"] is False
+            return self.response
+
+    monkeypatch.setattr(
+        rednote_module,
+        "generate_headers",
+        lambda a1, api, data="", method="POST": (
+            {"x-s": "fixture-signature"},
+            data,
+        ),
+    )
+    cases = [
+        (
+            FakeResponse(
+                200,
+                {"success": False, "msg": "service temporarily unavailable"},
+            ),
+            rednote_module.RednoteRequestUnavailableError,
+        ),
+        (
+            FakeResponse(
+                200,
+                {"success": False, "msg": "unexpected runtime condition"},
+            ),
+            rednote_module.RednoteRequestUnavailableError,
+        ),
+        (
+            FakeResponse(
+                403,
+                {"success": False, "msg": "captcha verification required"},
+            ),
+            rednote_module.RednoteVerificationRequiredError,
+        ),
+        (
+            FakeResponse(
+                200,
+                {"success": False, "msg": "session expired; login required"},
+            ),
+            rednote_module.RednoteSessionInvalidError,
+        ),
+    ]
+
+    for response, expected_error in cases:
+        monkeypatch.setattr(
+            rednote_module.requests,
+            "Session",
+            lambda response=response: FakeSession(response),
+        )
+        adapter = rednote_module.RednotePcAccountAdapter()
+        try:
+            adapter.get_user_info(
+                {"a1": "fixture-a1", "web_session": "fixture-session"}
+            )
+        except expected_error as exc:
+            assert "private" not in str(exc)
+        else:
+            raise AssertionError(
+                f"{expected_error.__name__} should classify the Rednote response"
+            )
+
+
+def test_rednote_account_adapter_rejects_redirect_without_following(monkeypatch):
+    import backend.app.adapters.xhs.rednote_account_adapter as rednote_module
+
+    class RedirectResponse:
+        status_code = 302
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            raise AssertionError("redirect body must not be processed")
+
+    class FakeSession:
+        trust_env = True
+
+        def get(self, *args, **kwargs):
+            assert kwargs["allow_redirects"] is False
+            return RedirectResponse()
+
+    fake_session = FakeSession()
+    monkeypatch.setattr(rednote_module.requests, "Session", lambda: fake_session)
+    monkeypatch.setattr(
+        rednote_module,
+        "generate_headers",
+        lambda a1, api, data="", method="POST": (
+            {"x-s": "fixture-signature"},
+            data,
+        ),
+    )
+
+    try:
+        rednote_module.RednotePcAccountAdapter().get_user_info(
+            {"a1": "fixture-a1", "web_session": "fixture-session"}
+        )
+    except rednote_module.RednoteSessionInvalidError as exc:
+        assert str(exc) == "Rednote account check redirected to authentication"
+    else:
+        raise AssertionError("Rednote account redirect should fail closed")
+    assert fake_session.trust_env is False
+
+
+def test_rednote_collection_adapter_classifies_terminal_session_failures():
+    import backend.app.adapters.xhs.rednote_pc_api_adapter as rednote_module
+
+    class FakeResponse:
+        def __init__(self, status_code, payload=None):
+            self.status_code = status_code
+            self.payload = payload or {}
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    cases = [
+        (
+            FakeResponse(302),
+            rednote_module.RednoteSessionInvalidError,
+        ),
+        (
+            FakeResponse(429),
+            rednote_module.RednoteRequestUnavailableError,
+        ),
+        (
+            FakeResponse(
+                200,
+                {"success": False, "msg": "captcha verification required"},
+            ),
+            rednote_module.RednoteVerificationRequiredError,
+        ),
+        (
+            FakeResponse(
+                403,
+                {"success": False, "msg": "captcha verification required"},
+            ),
+            rednote_module.RednoteVerificationRequiredError,
+        ),
+        (
+            FakeResponse(
+                200,
+                {"success": False, "msg": "service temporarily unavailable"},
+            ),
+            rednote_module.RednoteRequestUnavailableError,
+        ),
+        (
+            FakeResponse(
+                200,
+                {"success": False, "msg": "unexpected runtime condition"},
+            ),
+            rednote_module.RednoteRequestUnavailableError,
+        ),
+        (
+            FakeResponse(
+                200,
+                {"success": False, "msg": "session expired; login required"},
+            ),
+            rednote_module.RednoteSessionInvalidError,
+        ),
+    ]
+    for response, expected_error in cases:
+        try:
+            rednote_module.RednotePcApiAdapter._result(response)
+        except expected_error:
+            pass
+        else:
+            raise AssertionError(
+                f"{expected_error.__name__} should stop the Rednote session"
+            )
+
+
+def test_rednote_cookie_import_and_checks_never_fall_back_to_china_account(tmp_path):
+    from backend.app.api.accounts import (
+        get_creator_account_adapter,
+        get_pc_account_adapter,
+        get_rednote_account_adapter,
+        get_xhs_self_profile_adapter,
+    )
+    from backend.app.core.database import get_db
+    from backend.app.models import PlatformAccount
+
+    db_dependency = _override_database(tmp_path)
+    rednote_adapter = FakeRednoteAccountAdapter()
+    app.dependency_overrides[get_rednote_account_adapter] = lambda: rednote_adapter
+    app.dependency_overrides[get_pc_account_adapter] = lambda: FailingCookieAccountAdapter()
+    app.dependency_overrides[get_creator_account_adapter] = lambda: FailingCookieAccountAdapter()
+    app.dependency_overrides[get_xhs_self_profile_adapter] = (
+        lambda: FakeSelfProfileAdapter()
+    )
+    FakeSelfProfileAdapter.calls = []
+    try:
+        access_token = _register_and_get_access_token("rednote-cookie-operator")
+        import_response = client.post(
+            "/api/accounts/import-cookie",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={
+                "platform": "xhs",
+                "sub_type": "rednote_pc",
+                "cookie_string": "a1=rednote-a1; web_session=rednote-session",
+                "expected_external_user_id": "rednote-user-1",
+                "expected_nickname": "rednote-cookie-cat",
+            },
+        )
+        assert import_response.status_code == 200
+        imported = import_response.json()
+        assert imported["sub_type"] == "rednote_pc"
+        assert imported["external_user_id"] == "rednote-user-1"
+        assert imported["profile"]["site"] == "rednote"
+
+        healthy_response = client.post(
+            f"/api/accounts/{imported['id']}/check",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        assert healthy_response.status_code == 200
+        assert healthy_response.json()["status"] == "active"
+        assert healthy_response.json()["nickname"] == "rednote-cookie-cat"
+        assert healthy_response.json()["profile"]["site"] == "rednote"
+        assert FakeSelfProfileAdapter.calls == []
+        assert rednote_adapter.calls == 2
+
+        rednote_adapter.external_user_id = "different-rednote-user"
+        drift_response = client.post(
+            f"/api/accounts/{imported['id']}/check",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        assert drift_response.status_code == 200
+        assert drift_response.json()["status"] == "risk"
+        assert drift_response.json()["external_user_id"] == "rednote-user-1"
+
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            account = db.query(PlatformAccount).one()
+            assert account.external_user_id == "rednote-user-1"
+            assert account.status == "risk"
+        finally:
+            db.close()
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+        app.dependency_overrides.pop(get_rednote_account_adapter, None)
+        app.dependency_overrides.pop(get_pc_account_adapter, None)
+        app.dependency_overrides.pop(get_creator_account_adapter, None)
+        app.dependency_overrides.pop(get_xhs_self_profile_adapter, None)
+
+
+def test_rednote_cookie_import_rejects_identity_mismatch_without_persisting(tmp_path):
+    from backend.app.api.accounts import get_rednote_account_adapter
+    from backend.app.core.database import get_db
+    from backend.app.models import AccountCookieVersion, PlatformAccount
+
+    db_dependency = _override_database(tmp_path)
+    app.dependency_overrides[get_rednote_account_adapter] = lambda: FakeRednoteAccountAdapter()
+    try:
+        access_token = _register_and_get_access_token("rednote-mismatch-operator")
+        response = client.post(
+            "/api/accounts/import-cookie",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={
+                "platform": "xhs",
+                "sub_type": "rednote_pc",
+                "cookie_string": "a1=rednote-a1; web_session=rednote-session",
+                "expected_external_user_id": "another-user",
+            },
+        )
+        assert response.status_code == 400
+
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            assert db.query(PlatformAccount).count() == 0
+            assert db.query(AccountCookieVersion).count() == 0
+        finally:
+            db.close()
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+        app.dependency_overrides.pop(get_rednote_account_adapter, None)
+
+
+def test_rednote_cookie_import_classifies_temporary_verification_session_and_runtime_failures(
+    tmp_path,
+    monkeypatch,
+):
+    import requests
+
+    import backend.app.adapters.xhs.rednote_account_adapter as rednote_module
+    from backend.app.core.database import get_db
+    from backend.app.models import AccountCookieVersion, PlatformAccount
+
+    class FakeResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self.payload = payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise requests.HTTPError("private HTTP response detail")
+
+        def json(self):
+            return self.payload
+
+    response_holder = {"response": None}
+
+    class FakeSession:
+        trust_env = True
+
+        def get(self, *args, **kwargs):
+            assert kwargs["allow_redirects"] is False
+            return response_holder["response"]
+
+    monkeypatch.setattr(rednote_module.requests, "Session", FakeSession)
+    monkeypatch.setattr(
+        rednote_module,
+        "generate_headers",
+        lambda a1, api, data="", method="POST": (
+            {"x-s": "fixture-signature"},
+            data,
+        ),
+    )
+    db_dependency = _override_database(tmp_path)
+    try:
+        access_token = _register_and_get_access_token(
+            "rednote-classified-import-operator"
+        )
+        cases = [
+            (
+                FakeResponse(
+                    200,
+                    {"success": False, "msg": "service temporarily unavailable"},
+                ),
+                503,
+                "Rednote account validation is temporarily unavailable",
+            ),
+            (
+                FakeResponse(
+                    200,
+                    {"success": False, "msg": "unexpected runtime condition"},
+                ),
+                503,
+                "Rednote account validation is temporarily unavailable",
+            ),
+            (
+                FakeResponse(
+                    403,
+                    {"success": False, "msg": "captcha verification required"},
+                ),
+                400,
+                "Rednote requires interactive verification",
+            ),
+            (
+                FakeResponse(
+                    200,
+                    {"success": False, "msg": "session expired; login required"},
+                ),
+                400,
+                "Rednote session is invalid or expired",
+            ),
+        ]
+        for fake_response, expected_status, expected_detail in cases:
+            response_holder["response"] = fake_response
+            response = client.post(
+                "/api/accounts/import-cookie",
+                headers={"Authorization": f"Bearer {access_token}"},
+                json={
+                    "platform": "xhs",
+                    "sub_type": "rednote_pc",
+                    "cookie_string": "a1=rednote-a1; web_session=rednote-session",
+                    "expected_external_user_id": "rednote-user-1",
+                },
+            )
+
+            assert response.status_code == expected_status
+            assert response.json() == {"detail": expected_detail}
+            assert "private" not in response.text
+
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            assert db.query(PlatformAccount).count() == 0
+            assert db.query(AccountCookieVersion).count() == 0
+        finally:
+            db.close()
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_rednote_manual_check_rejects_missing_stored_identity_anchor(tmp_path):
+    from backend.app.api.accounts import get_rednote_account_adapter
+    from backend.app.core.database import get_db
+    from backend.app.core.security import encrypt_text
+    from backend.app.models import AccountCookieVersion, PlatformAccount
+
+    db_dependency = _override_database(tmp_path)
+    access_token = _register_and_get_access_token("rednote-missing-anchor-operator")
+    app.dependency_overrides[get_rednote_account_adapter] = lambda: FakeRednoteAccountAdapter()
+    db = next(app.dependency_overrides[get_db]())
+    try:
+        account = PlatformAccount(
+            user_id=1,
+            platform="xhs",
+            sub_type="rednote_pc",
+            external_user_id="",
+            nickname="legacy-rednote-account",
+            status="active",
+        )
+        db.add(account)
+        db.flush()
+        account_id = account.id
+        db.add(
+            AccountCookieVersion(
+                platform_account_id=account_id,
+                encrypted_cookies=encrypt_text(
+                    '{"a1":"rednote-a1","web_session":"rednote-session"}'
+                ),
+            )
+        )
+        db.commit()
+
+        response = client.post(
+            f"/api/accounts/{account_id}/check",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "risk"
+        assert response.json()["external_user_id"] == ""
+    finally:
+        db.close()
+        app.dependency_overrides.pop(db_dependency, None)
+        app.dependency_overrides.pop(get_rednote_account_adapter, None)
+
+
+def test_rednote_manual_check_classifies_real_adapter_failures(
+    tmp_path,
+    monkeypatch,
+):
+    import requests
+
+    import backend.app.adapters.xhs.rednote_account_adapter as rednote_module
+    from backend.app.core.database import get_db
+    from backend.app.core.security import encrypt_text
+    from backend.app.models import AccountCookieVersion, PlatformAccount
+
+    class FakeResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self.payload = payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise requests.HTTPError("private HTTP response detail")
+
+        def json(self):
+            return self.payload
+
+    response_holder = {"response": None}
+
+    class FakeSession:
+        trust_env = True
+
+        def get(self, *args, **kwargs):
+            assert kwargs["allow_redirects"] is False
+            return response_holder["response"]
+
+    monkeypatch.setattr(rednote_module.requests, "Session", FakeSession)
+    monkeypatch.setattr(
+        rednote_module,
+        "generate_headers",
+        lambda a1, api, data="", method="POST": (
+            {"x-s": "fixture-signature"},
+            data,
+        ),
+    )
+    db_dependency = _override_database(tmp_path)
+    try:
+        access_token = _register_and_get_access_token(
+            "rednote-real-adapter-check-operator"
+        )
+        setup_db = next(app.dependency_overrides[get_db]())
+        try:
+            account = PlatformAccount(
+                user_id=1,
+                platform="xhs",
+                sub_type="rednote_pc",
+                external_user_id="rednote-user-1",
+                nickname="rednote-cookie-cat",
+                status="active",
+            )
+            setup_db.add(account)
+            setup_db.flush()
+            account_id = account.id
+            setup_db.add(
+                AccountCookieVersion(
+                    platform_account_id=account.id,
+                    encrypted_cookies=encrypt_text(
+                        '{"a1":"fixture-a1","web_session":"fixture-session"}'
+                    ),
+                )
+            )
+            setup_db.commit()
+        finally:
+            setup_db.close()
+
+        cases = [
+            (
+                FakeResponse(
+                    403,
+                    {"success": False, "msg": "captcha verification required"},
+                ),
+                "risk",
+                "Rednote requires interactive verification",
+            ),
+            (
+                FakeResponse(
+                    200,
+                    {"success": False, "msg": "service temporarily unavailable"},
+                ),
+                "unknown",
+                "Rednote health check is temporarily unavailable",
+            ),
+            (
+                FakeResponse(
+                    200,
+                    {"success": False, "msg": "session expired; login required"},
+                ),
+                "expired",
+                "Rednote session is invalid or expired",
+            ),
+            (
+                FakeResponse(
+                    200,
+                    {"success": False, "msg": "unexpected runtime condition"},
+                ),
+                "unknown",
+                "Rednote health check is temporarily unavailable",
+            ),
+        ]
+        for fake_response, expected_status, expected_message in cases:
+            response_holder["response"] = fake_response
+            response = client.post(
+                f"/api/accounts/{account_id}/check",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+
+            assert response.status_code == 200
+            assert response.json()["status"] == expected_status
+            assert response.json()["status_message"] == expected_message
+            assert "private" not in response.text
+
+            db = next(app.dependency_overrides[get_db]())
+            try:
+                account = db.get(PlatformAccount, account_id)
+                account.status = "active"
+                account.status_message = ""
+                db.commit()
+            finally:
+                db.close()
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_scheduled_rednote_check_marks_identity_drift_without_rebinding(tmp_path, monkeypatch):
+    import backend.app.adapters.xhs.rednote_account_adapter as rednote_module
+    from backend.app.core.database import get_db
+    from backend.app.core.security import encrypt_text
+    from backend.app.core.time import shanghai_now
+    from backend.app.models import AccountCookieVersion, PlatformAccount
+    from backend.app.services.scheduler_service import _check_single_account
+
+    class DriftedRednoteAdapter:
+        def get_user_info(self, cookies):
+            assert cookies == {"a1": "fixture-a1", "web_session": "fixture-session"}
+            return {
+                "external_user_id": "different-rednote-user",
+                "nickname": "different-account",
+                "profile": {"site": "rednote"},
+            }
+
+    monkeypatch.setattr(rednote_module, "RednotePcAccountAdapter", DriftedRednoteAdapter)
+    db_dependency = _override_database(tmp_path)
+    db = next(app.dependency_overrides[get_db]())
+    try:
+        account = PlatformAccount(
+            user_id=1,
+            platform="xhs",
+            sub_type="rednote_pc",
+            external_user_id="rednote-user-1",
+            nickname="rednote-cookie-cat",
+            status="active",
+        )
+        db.add(account)
+        db.flush()
+        db.add(
+            AccountCookieVersion(
+                platform_account_id=account.id,
+                encrypted_cookies=encrypt_text(
+                    '{"a1":"fixture-a1","web_session":"fixture-session"}'
+                ),
+            )
+        )
+        db.commit()
+
+        old_status = _check_single_account(db, account, shanghai_now())
+
+        assert old_status == "active"
+        assert account.status == "risk"
+        assert account.external_user_id == "rednote-user-1"
+        assert account.status_message == "Authenticated identity changed; account was not rebound"
+
+        account.status = "active"
+        account.status_message = ""
+        account.external_user_id = ""
+        db.flush()
+
+        missing_anchor_old_status = _check_single_account(db, account, shanghai_now())
+
+        assert missing_anchor_old_status == "active"
+        assert account.status == "risk"
+        assert account.external_user_id == ""
+    finally:
+        db.close()
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_scheduled_rednote_check_classifies_real_adapter_failures(
+    tmp_path,
+    monkeypatch,
+):
+    import requests
+
+    import backend.app.adapters.xhs.rednote_account_adapter as rednote_module
+    from backend.app.core.database import get_db
+    from backend.app.core.security import encrypt_text
+    from backend.app.core.time import shanghai_now
+    from backend.app.models import AccountCookieVersion, PlatformAccount
+    from backend.app.services.scheduler_service import _check_single_account
+
+    class FakeResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self.payload = payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise requests.HTTPError("private HTTP response detail")
+
+        def json(self):
+            return self.payload
+
+    response_holder = {"response": None}
+
+    class FakeSession:
+        trust_env = True
+
+        def get(self, *args, **kwargs):
+            assert kwargs["allow_redirects"] is False
+            return response_holder["response"]
+
+    monkeypatch.setattr(rednote_module.requests, "Session", FakeSession)
+    monkeypatch.setattr(
+        rednote_module,
+        "generate_headers",
+        lambda a1, api, data="", method="POST": (
+            {"x-s": "fixture-signature"},
+            data,
+        ),
+    )
+    db_dependency = _override_database(tmp_path)
+    db = next(app.dependency_overrides[get_db]())
+    try:
+        account = PlatformAccount(
+            user_id=1,
+            platform="xhs",
+            sub_type="rednote_pc",
+            external_user_id="rednote-user-1",
+            nickname="rednote-cookie-cat",
+            status="active",
+        )
+        db.add(account)
+        db.flush()
+        db.add(
+            AccountCookieVersion(
+                platform_account_id=account.id,
+                encrypted_cookies=encrypt_text(
+                    '{"a1":"fixture-a1","web_session":"fixture-session"}'
+                ),
+            )
+        )
+        db.commit()
+
+        cases = [
+            (
+                FakeResponse(
+                    403,
+                    {"success": False, "msg": "captcha verification required"},
+                ),
+                "risk",
+                "Rednote requires interactive verification",
+            ),
+            (
+                FakeResponse(
+                    200,
+                    {"success": False, "msg": "service temporarily unavailable"},
+                ),
+                "unknown",
+                "Rednote health check is temporarily unavailable",
+            ),
+            (
+                FakeResponse(
+                    200,
+                    {"success": False, "msg": "session expired; login required"},
+                ),
+                "expired",
+                "Rednote session is invalid or expired",
+            ),
+            (
+                FakeResponse(
+                    200,
+                    {"success": False, "msg": "unexpected runtime condition"},
+                ),
+                "unknown",
+                "Rednote health check is temporarily unavailable",
+            ),
+        ]
+        for fake_response, expected_status, expected_message in cases:
+            response_holder["response"] = fake_response
+            account.status = "active"
+            account.status_message = ""
+
+            old_status = _check_single_account(db, account, shanghai_now())
+
+            assert old_status == "active"
+            assert account.status == expected_status
+            assert account.status_message == expected_message
+            assert "private" not in account.status_message
+    finally:
+        db.close()
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_scheduled_rednote_unclassified_response_does_not_emit_expired_notification(
+    tmp_path,
+    monkeypatch,
+):
+    import backend.app.adapters.xhs.rednote_account_adapter as rednote_module
+    from backend.app.core.database import get_db
+    from backend.app.core.security import encrypt_text
+    from backend.app.models import AccountCookieVersion, Notification, PlatformAccount
+    from backend.app.services import scheduler_service
+
+    class UnclassifiedFailureResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"success": False, "msg": "unexpected runtime condition"}
+
+    class FakeSession:
+        trust_env = True
+
+        def get(self, *args, **kwargs):
+            assert kwargs["allow_redirects"] is False
+            return UnclassifiedFailureResponse()
+
+    monkeypatch.setattr(rednote_module.requests, "Session", FakeSession)
+    monkeypatch.setattr(
+        rednote_module,
+        "generate_headers",
+        lambda a1, api, data="", method="POST": (
+            {"x-s": "fixture-signature"},
+            data,
+        ),
+    )
+    db_dependency = _override_database(tmp_path)
+    setup_db = next(app.dependency_overrides[get_db]())
+    try:
+        account = PlatformAccount(
+            user_id=1,
+            platform="xhs",
+            sub_type="rednote_pc",
+            external_user_id="rednote-user-1",
+            nickname="rednote-cookie-cat",
+            status="active",
+        )
+        setup_db.add(account)
+        setup_db.flush()
+        account_id = account.id
+        setup_db.add(
+            AccountCookieVersion(
+                platform_account_id=account.id,
+                encrypted_cookies=encrypt_text(
+                    '{"a1":"fixture-a1","web_session":"fixture-session"}'
+                ),
+            )
+        )
+        setup_db.commit()
+    finally:
+        setup_db.close()
+
+    monkeypatch.setattr(
+        scheduler_service,
+        "SessionLocal",
+        lambda: next(app.dependency_overrides[get_db]()),
+    )
+    try:
+        scheduler_service.check_all_account_cookies_once()
+
+        verify_db = next(app.dependency_overrides[get_db]())
+        try:
+            checked = verify_db.get(PlatformAccount, account_id)
+            assert checked.status == "unknown"
+            assert checked.status_message == (
+                "Rednote health check is temporarily unavailable"
+            )
+            assert verify_db.query(Notification).count() == 0
+        finally:
+            verify_db.close()
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
 
 
 class FakeXhsPcSearchAdapter:
@@ -1297,7 +2732,14 @@ class FakeXhsPcSearchAdapter:
         )
 
 
-def _create_pc_account_with_cookie(tmp_path, username="search-owner"):
+def _create_pc_account_with_cookie(
+    tmp_path,
+    username="search-owner",
+    sub_type="pc",
+    *,
+    account_status="active",
+    external_user_id="search-user",
+):
     from backend.app.core.database import get_db
     from backend.app.core.security import encrypt_text
     from backend.app.models import AccountCookieVersion, PlatformAccount
@@ -1309,10 +2751,10 @@ def _create_pc_account_with_cookie(tmp_path, username="search-owner"):
         account = PlatformAccount(
             user_id=1,
             platform="xhs",
-            sub_type="pc",
-            external_user_id="search-user",
+            sub_type=sub_type,
+            external_user_id=external_user_id,
             nickname="搜索账号",
-            status="active",
+            status=account_status,
         )
         db.add(account)
         db.flush()
@@ -2985,11 +4427,17 @@ def test_xhs_crawl_routes_are_authenticated_task_backed_and_persist_notes(tmp_pa
         url_response = client.post(
             "/api/xhs/crawl/note-urls",
             headers={"Authorization": f"Bearer {owner_token}"},
-            json={"account_id": owner_account_id, "urls": ["https://www.xiaohongshu.com/explore/crawl-url-001"]},
+            json={
+                "account_id": owner_account_id,
+                "urls": ["https://untrusted.example/explore/crawl-url-001"],
+            },
         )
         assert url_response.status_code == 200
         assert url_response.json()["saved_count"] == 1
         assert url_response.json()["items"][0]["note_id"] == "crawl-url-001"
+        assert url_response.json()["items"][0]["raw_json"]["note_url"] == (
+            "https://www.xiaohongshu.com/explore/crawl-url-001"
+        )
 
         user_response = client.post(
             "/api/xhs/crawl/user-notes",
@@ -3013,6 +4461,652 @@ def test_xhs_crawl_routes_are_authenticated_task_backed_and_persist_notes(tmp_pa
             db.close()
     finally:
         app.dependency_overrides.pop(get_xhs_pc_api_adapter_factory, None)
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_rednote_account_can_collect_profile_notes_without_china_adapter(tmp_path, monkeypatch):
+    from backend.app.api.platforms.xhs import crawl as crawl_module
+
+    class FakeRednoteCollectionAdapter:
+        calls: list[tuple[str, str]] = []
+
+        def __init__(self, cookies):
+            assert "json-a1" in cookies
+
+        def get_user_notes(self, user_url):
+            self.__class__.calls.append(("user_notes", user_url))
+            return True, "ok", [
+                {
+                    "note_card": {
+                        "note_id": "rednote-profile-001",
+                        "display_title": "Rednote profile note",
+                        "desc": "collected through the Rednote account path",
+                        "note_url": "https://www.xiaohongshu.com/explore/wrong-origin",
+                        "cover": {"url": "https://media.example.test/rednote-cover.webp"},
+                        "user": {"nickname": "Rednote author"},
+                        "interact_info": {"liked_count": 5},
+                    }
+                }
+            ]
+
+    monkeypatch.setattr(
+        crawl_module,
+        "RednotePcApiAdapter",
+        FakeRednoteCollectionAdapter,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        crawl_module,
+        "_download_asset",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("Rednote collection must not fetch remote media")
+        ),
+    )
+    db_dependency, owner_token, account_id = _create_pc_account_with_cookie(
+        tmp_path,
+        "rednote-crawl-owner",
+        sub_type="rednote_pc",
+    )
+    try:
+        response = client.post(
+            "/api/xhs/crawl/user-notes",
+            headers={"Authorization": f"Bearer {owner_token}"},
+            json={
+                "account_id": account_id,
+                "user_url": "https://www.rednote.com/user/profile/public-fixture",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["saved_count"] == 1
+        assert response.json()["items"][0]["note_id"] == "rednote-profile-001"
+        assert response.json()["items"][0]["raw_json"]["note_url"] == (
+            "https://www.rednote.com/explore/rednote-profile-001"
+        )
+        assert FakeRednoteCollectionAdapter.calls == [
+            ("user_notes", "https://www.rednote.com/user/profile/public-fixture")
+        ]
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_rednote_account_can_collect_note_details_from_crawler(tmp_path, monkeypatch):
+    from backend.app.api.platforms.xhs import crawl as crawl_module
+    from backend.app.core.database import get_db
+    from backend.app.models import Note, NoteAsset, Task
+
+    class FakeRednoteCollectionAdapter:
+        calls: list[str] = []
+
+        def __init__(self, cookies):
+            assert "json-session" in cookies
+
+        def get_note_info(self, url):
+            self.__class__.calls.append(url)
+            return True, "ok", {
+                "data": {
+                    "items": [
+                        {
+                            "note_card": {
+                                "note_id": "rednote-detail-001",
+                                "display_title": "Rednote detail",
+                                "desc": "collected from a Rednote note URL",
+                                "user": {"nickname": "Rednote author"},
+                                "interact_info": {"liked_count": 12},
+                                "cover": {
+                                    "url": "https://media.example.test/rednote-detail-cover.webp"
+                                },
+                                "video": {
+                                    "media": {
+                                        "stream": {
+                                            "h264": [
+                                                {
+                                                    "master_url": "https://media.example.test/rednote-detail.mp4"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                },
+                            }
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr(crawl_module, "RednotePcApiAdapter", FakeRednoteCollectionAdapter)
+    monkeypatch.setattr(
+        crawl_module,
+        "_download_asset",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("Rednote detail collection must not fetch remote media")
+        ),
+    )
+    db_dependency, owner_token, account_id = _create_pc_account_with_cookie(
+        tmp_path,
+        "rednote-detail-owner",
+        sub_type="rednote_pc",
+    )
+    note_url = "https://www.rednote.com/explore/rednote-detail-001"
+    try:
+        response = client.post(
+            "/api/xhs/crawl/data",
+            headers={"Authorization": f"Bearer {owner_token}"},
+            json={
+                "account_id": account_id,
+                "mode": "note_urls",
+                "urls": [note_url],
+                "fetch_comments": False,
+            },
+        )
+
+        assert response.status_code == 200
+        events = [
+            json.loads(line.removeprefix("data: "))
+            for line in response.text.splitlines()
+            if line.startswith("data: ")
+        ]
+        assert events[0]["type"] == "item"
+        assert events[0]["item"]["status"] == "success"
+        assert events[0]["item"]["note"]["note_id"] == "rednote-detail-001"
+        assert events[0]["item"]["note"]["note_url"] == note_url
+        assert events[-1] == {
+            "type": "done",
+            "status": "completed",
+            "task_id": events[-1]["task_id"],
+            "total": 1,
+            "success_count": 1,
+            "saved_count": 1,
+            "failed_count": 0,
+            "terminal_error": None,
+        }
+        assert FakeRednoteCollectionAdapter.calls == [note_url]
+
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            saved_note = db.query(Note).one()
+            saved_assets = db.query(NoteAsset).order_by(NoteAsset.asset_type.asc()).all()
+            task = db.query(Task).order_by(Task.id.desc()).first()
+            assert saved_note.note_id == "rednote-detail-001"
+            assert saved_note.raw_json["note_url"] == note_url
+            assert {(asset.asset_type, asset.url, asset.local_path) for asset in saved_assets} == {
+                (
+                    "image",
+                    "https://media.example.test/rednote-detail-cover.webp",
+                    "",
+                ),
+                (
+                    "video",
+                    "https://media.example.test/rednote-detail.mp4",
+                    "",
+                ),
+            }
+            assert task.status == "completed"
+            assert task.payload["saved_count"] == 1
+        finally:
+            db.close()
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_rednote_metadata_refresh_preserves_local_assets_and_replaces_remote_only_assets(
+    tmp_path, monkeypatch
+):
+    from backend.app.api.platforms.xhs import crawl as crawl_module
+    from backend.app.core.database import get_db
+    from backend.app.models import Note, NoteAsset, PlatformAccount
+
+    class RefreshAdapter:
+        def __init__(self, cookies):
+            assert "json-session" in cookies
+
+        def get_note_info(self, url):
+            return True, "ok", {
+                "data": {
+                    "items": [
+                        {
+                            "note_card": {
+                                "note_id": "shared-note-001",
+                                "display_title": "Refreshed Rednote detail",
+                                "desc": "Current remote metadata",
+                                "user": {"nickname": "Rednote author"},
+                                "cover": {
+                                    "url": "https://media.example.test/current-cover.webp"
+                                },
+                                "video": {
+                                    "media": {
+                                        "stream": {
+                                            "h264": [
+                                                {
+                                                    "master_url": "https://media.example.test/current-video.mp4"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                },
+                            }
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr(crawl_module, "RednotePcApiAdapter", RefreshAdapter)
+    monkeypatch.setattr(
+        crawl_module,
+        "_download_asset",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("Rednote metadata refresh must not fetch remote media")
+        ),
+    )
+    db_dependency, owner_token, rednote_account_id = _create_pc_account_with_cookie(
+        tmp_path,
+        "rednote-asset-refresh-owner",
+        sub_type="rednote_pc",
+    )
+    try:
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            rednote_account = db.get(PlatformAccount, rednote_account_id)
+            china_account = PlatformAccount(
+                user_id=rednote_account.user_id,
+                platform="xhs",
+                sub_type="pc",
+                external_user_id="china-source-fixture",
+                nickname="China source fixture",
+                status="active",
+            )
+            db.add(china_account)
+            db.flush()
+            note = Note(
+                user_id=rednote_account.user_id,
+                platform_account_id=china_account.id,
+                platform="xhs",
+                note_id="shared-note-001",
+                title="Existing library note",
+            )
+            db.add(note)
+            db.flush()
+            kept_local = NoteAsset(
+                note_id=note.id,
+                asset_type="image",
+                url="https://media.example.test/kept-local.webp",
+                local_path="users/1/assets/kept-local.webp",
+            )
+            matched_local = NoteAsset(
+                note_id=note.id,
+                asset_type="image",
+                url="https://media.example.test/current-cover.webp",
+                local_path="users/1/assets/current-cover.webp",
+            )
+            db.add_all(
+                [
+                    kept_local,
+                    matched_local,
+                    NoteAsset(
+                        note_id=note.id,
+                        asset_type="image",
+                        url="https://media.example.test/stale-remote.webp",
+                        local_path="",
+                    ),
+                ]
+            )
+            db.commit()
+            retained_local_ids = {kept_local.id, matched_local.id}
+        finally:
+            db.close()
+
+        for _ in range(2):
+            response = client.post(
+                "/api/xhs/crawl/note-urls",
+                headers={"Authorization": f"Bearer {owner_token}"},
+                json={
+                    "account_id": rednote_account_id,
+                    "urls": ["https://www.rednote.com/explore/shared-note-001"],
+                    "fetch_comments": False,
+                },
+            )
+            assert response.status_code == 200
+            assert response.json()["saved_count"] == 1
+
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            saved_note = db.query(Note).one()
+            assets = db.query(NoteAsset).order_by(NoteAsset.id.asc()).all()
+            assert saved_note.platform_account_id == rednote_account_id
+            assert {
+                asset.id for asset in assets if asset.local_path
+            } == retained_local_ids
+            assert {
+                (asset.asset_type, asset.url, asset.local_path) for asset in assets
+            } == {
+                (
+                    "image",
+                    "https://media.example.test/kept-local.webp",
+                    "users/1/assets/kept-local.webp",
+                ),
+                (
+                    "image",
+                    "https://media.example.test/current-cover.webp",
+                    "users/1/assets/current-cover.webp",
+                ),
+                (
+                    "video",
+                    "https://media.example.test/current-video.mp4",
+                    "",
+                ),
+            }
+        finally:
+            db.close()
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_rednote_stream_persists_success_before_later_verification_stops_batch(
+    tmp_path, monkeypatch
+):
+    from backend.app.adapters.xhs.rednote_account_adapter import (
+        RednoteVerificationRequiredError,
+    )
+    from backend.app.api.platforms.xhs import crawl as crawl_module
+    from backend.app.core.database import get_db
+    from backend.app.models import Note, PlatformAccount, Task
+
+    class VerificationAdapter:
+        calls: list[str] = []
+
+        def __init__(self, cookies):
+            assert "json-session" in cookies
+
+        def get_note_info(self, url):
+            self.__class__.calls.append(url)
+            if len(self.__class__.calls) == 1:
+                return True, "ok", {
+                    "data": {
+                        "items": [
+                            {
+                                "note_card": {
+                                    "note_id": "verification-first",
+                                    "display_title": "Saved before verification",
+                                    "desc": "The first public note remains durable.",
+                                    "user": {"nickname": "Rednote author"},
+                                }
+                            }
+                        ]
+                    }
+                }
+            raise RednoteVerificationRequiredError("private remote response")
+
+    monkeypatch.setattr(crawl_module, "RednotePcApiAdapter", VerificationAdapter)
+    db_dependency, owner_token, account_id = _create_pc_account_with_cookie(
+        tmp_path,
+        "rednote-verification-owner",
+        sub_type="rednote_pc",
+    )
+    first_url = "https://www.rednote.com/explore/verification-first"
+    second_url = "https://www.rednote.com/explore/verification-second"
+    try:
+        response = client.post(
+            "/api/xhs/crawl/data",
+            headers={"Authorization": f"Bearer {owner_token}"},
+            json={
+                "account_id": account_id,
+                "mode": "note_urls",
+                "urls": [first_url, second_url],
+                "fetch_comments": False,
+            },
+        )
+
+        assert response.status_code == 200
+        events = [
+            json.loads(line.removeprefix("data: "))
+            for line in response.text.splitlines()
+            if line.startswith("data: ")
+        ]
+        assert events[0]["type"] == "item"
+        assert events[0]["item"]["status"] == "success"
+        assert events[0]["item"]["note"]["note_id"] == "verification-first"
+        assert events[1] == {
+            "type": "error",
+            "message": "Rednote requires interactive verification",
+        }
+        assert events[-1]["type"] == "done"
+        assert events[-1]["status"] == "failed"
+        assert events[-1]["total"] == 1
+        assert events[-1]["success_count"] == 1
+        assert events[-1]["saved_count"] == 1
+        assert events[-1]["terminal_error"] == (
+            "Rednote requires interactive verification"
+        )
+        assert VerificationAdapter.calls == [first_url, second_url]
+
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            account = db.get(PlatformAccount, account_id)
+            task = db.query(Task).order_by(Task.id.desc()).first()
+            saved_note = db.query(Note).one()
+            assert saved_note.note_id == "verification-first"
+            assert saved_note.raw_json["note_url"] == first_url
+            assert account.status == "risk"
+            assert account.status_message == (
+                "Rednote requires interactive verification"
+            )
+            assert task.status == "failed"
+            assert task.payload["result_count"] == 1
+            assert task.payload["saved_count"] == 1
+            assert "private remote response" not in json.dumps(task.payload)
+        finally:
+            db.close()
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_rednote_note_url_route_persists_success_before_later_redirect_stops_batch(
+    tmp_path, monkeypatch
+):
+    from backend.app.adapters.xhs.rednote_account_adapter import (
+        RednoteSessionInvalidError,
+    )
+    from backend.app.api.platforms.xhs import crawl as crawl_module
+    from backend.app.core.database import get_db
+    from backend.app.models import Note, PlatformAccount, Task
+
+    class RedirectedAdapter:
+        calls: list[str] = []
+
+        def __init__(self, cookies):
+            assert "json-a1" in cookies
+
+        def get_note_info(self, url):
+            self.__class__.calls.append(url)
+            if len(self.__class__.calls) == 1:
+                return True, "ok", {
+                    "data": {
+                        "items": [
+                            {
+                                "note_card": {
+                                    "note_id": "redirect-first",
+                                    "display_title": "Saved before redirect",
+                                    "desc": "The first public note remains durable.",
+                                    "user": {"nickname": "Rednote author"},
+                                }
+                            }
+                        ]
+                    }
+                }
+            raise RednoteSessionInvalidError("private redirect location")
+
+    monkeypatch.setattr(crawl_module, "RednotePcApiAdapter", RedirectedAdapter)
+    db_dependency, owner_token, account_id = _create_pc_account_with_cookie(
+        tmp_path,
+        "rednote-redirect-owner",
+        sub_type="rednote_pc",
+    )
+    first_url = "https://www.rednote.com/explore/redirect-first"
+    second_url = "https://www.rednote.com/explore/redirect-second"
+    try:
+        response = client.post(
+            "/api/xhs/crawl/note-urls",
+            headers={"Authorization": f"Bearer {owner_token}"},
+            json={
+                "account_id": account_id,
+                "urls": [first_url, second_url],
+                "fetch_comments": False,
+            },
+        )
+
+        assert response.status_code == 502
+        assert response.json()["detail"] == (
+            "Rednote session is invalid or expired"
+        )
+        assert RedirectedAdapter.calls == [first_url, second_url]
+
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            account = db.get(PlatformAccount, account_id)
+            task = db.query(Task).order_by(Task.id.desc()).first()
+            saved_note = db.query(Note).one()
+            assert saved_note.note_id == "redirect-first"
+            assert saved_note.raw_json["note_url"] == first_url
+            assert account.status == "expired"
+            assert account.status_message == "Rednote session is invalid or expired"
+            assert task.status == "failed"
+            assert task.payload["result_count"] == 1
+            assert task.payload["saved_count"] == 1
+            assert "private redirect location" not in json.dumps(task.payload)
+        finally:
+            db.close()
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_rednote_collection_rejects_unhealthy_account_before_adapter(tmp_path, monkeypatch):
+    from backend.app.api.platforms.xhs import crawl as crawl_module
+
+    class UnexpectedRednoteAdapter:
+        def __init__(self, cookies):
+            raise AssertionError("unhealthy Rednote account reached the network adapter")
+
+    monkeypatch.setattr(crawl_module, "RednotePcApiAdapter", UnexpectedRednoteAdapter)
+    db_dependency, owner_token, account_id = _create_pc_account_with_cookie(
+        tmp_path,
+        "rednote-risk-owner",
+        sub_type="rednote_pc",
+        account_status="risk",
+    )
+    try:
+        response = client.post(
+            "/api/xhs/crawl/user-notes",
+            headers={"Authorization": f"Bearer {owner_token}"},
+            json={
+                "account_id": account_id,
+                "user_url": "https://www.rednote.com/user/profile/public-fixture",
+            },
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == (
+            "Rednote account must pass its account check before collection"
+        )
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_rednote_collection_rejects_missing_identity_anchor_before_adapter(
+    tmp_path, monkeypatch
+):
+    from backend.app.api.platforms.xhs import crawl as crawl_module
+
+    class UnexpectedRednoteAdapter:
+        def __init__(self, cookies):
+            raise AssertionError("unanchored Rednote account reached the network adapter")
+
+    monkeypatch.setattr(crawl_module, "RednotePcApiAdapter", UnexpectedRednoteAdapter)
+    db_dependency, owner_token, account_id = _create_pc_account_with_cookie(
+        tmp_path,
+        "rednote-unanchored-owner",
+        sub_type="rednote_pc",
+        external_user_id="",
+    )
+    try:
+        response = client.post(
+            "/api/xhs/crawl/data",
+            headers={"Authorization": f"Bearer {owner_token}"},
+            json={
+                "account_id": account_id,
+                "mode": "note_urls",
+                "urls": ["https://www.rednote.com/explore/public-fixture"],
+                "fetch_comments": False,
+            },
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == (
+            "Rednote account is missing its verified identity anchor"
+        )
+    finally:
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_rednote_collection_rejects_unsupported_modes_before_adapter(
+    tmp_path, monkeypatch
+):
+    from backend.app.api.platforms.xhs import crawl as crawl_module
+
+    class UnexpectedRednoteAdapter:
+        def __init__(self, cookies):
+            raise AssertionError("unsupported Rednote mode reached the network adapter")
+
+    monkeypatch.setattr(crawl_module, "RednotePcApiAdapter", UnexpectedRednoteAdapter)
+    db_dependency, owner_token, account_id = _create_pc_account_with_cookie(
+        tmp_path,
+        "rednote-mode-owner",
+        sub_type="rednote_pc",
+    )
+    try:
+        comment_response = client.post(
+            "/api/xhs/crawl/note-urls",
+            headers={"Authorization": f"Bearer {owner_token}"},
+            json={
+                "account_id": account_id,
+                "urls": ["https://www.rednote.com/explore/public-fixture"],
+                "fetch_comments": True,
+            },
+        )
+        assert comment_response.status_code == 400
+        assert comment_response.json()["detail"] == (
+            "Rednote collection does not support comments"
+        )
+
+        requests = [
+            {
+                "account_id": account_id,
+                "mode": "search",
+                "keyword": "fixture",
+                "fetch_comments": False,
+            },
+            {
+                "account_id": account_id,
+                "mode": "comments",
+                "urls": ["https://www.rednote.com/explore/public-fixture"],
+                "fetch_comments": False,
+            },
+            {
+                "account_id": account_id,
+                "mode": "note_urls",
+                "urls": ["https://www.rednote.com/explore/public-fixture"],
+                "fetch_comments": True,
+            },
+        ]
+        for payload in requests:
+            response = client.post(
+                "/api/xhs/crawl/data",
+                headers={"Authorization": f"Bearer {owner_token}"},
+                json=payload,
+            )
+            assert response.status_code == 400
+            assert response.json()["detail"] == (
+                "Rednote collection currently supports note URLs without comments"
+            )
+    finally:
         app.dependency_overrides.pop(db_dependency, None)
 
 
@@ -6354,6 +8448,224 @@ def test_due_publish_scheduler_registers_interval_job():
         assert job_intervals["cookie_health_checker"] == 7200
     finally:
         shutdown_due_publish_scheduler(scheduler)
+
+
+def _create_background_auto_task_fixture(
+    tmp_path,
+    *,
+    search_sub_type,
+    publish_sub_type,
+):
+    from backend.app.core.database import get_db
+    from backend.app.core.security import encrypt_text
+    from backend.app.models import (
+        AccountCookieVersion,
+        AutoTask,
+        PlatformAccount,
+        User,
+    )
+
+    db_dependency = _override_database(tmp_path)
+    db = next(app.dependency_overrides[get_db]())
+    try:
+        user = User(
+            username=f"auto-task-{search_sub_type}-{publish_sub_type}",
+            password_hash="not-used",
+        )
+        db.add(user)
+        db.flush()
+        search_account = PlatformAccount(
+            user_id=user.id,
+            platform="xhs",
+            sub_type=search_sub_type,
+            external_user_id=f"{search_sub_type}-auto-search",
+            nickname="Search fixture",
+            status="active",
+        )
+        publish_account = PlatformAccount(
+            user_id=user.id,
+            platform="xhs",
+            sub_type=publish_sub_type,
+            external_user_id=f"{publish_sub_type}-auto-publish",
+            nickname="Publish fixture",
+            status="active",
+        )
+        db.add_all([search_account, publish_account])
+        db.flush()
+        db.add_all(
+            [
+                AccountCookieVersion(
+                    platform_account_id=search_account.id,
+                    encrypted_cookies=encrypt_text(
+                        '{"a1":"search-fixture","web_session":"search-session"}'
+                    ),
+                ),
+                AccountCookieVersion(
+                    platform_account_id=publish_account.id,
+                    encrypted_cookies=encrypt_text(
+                        '{"a1":"publish-fixture","web_session":"publish-session"}'
+                    ),
+                ),
+            ]
+        )
+        auto_task = AutoTask(
+            user_id=user.id,
+            name="Auto task account gate fixture",
+            keywords=["fixture keyword"],
+            pc_account_id=search_account.id,
+            creator_account_id=publish_account.id,
+            status="active",
+        )
+        db.add(auto_task)
+        db.commit()
+        return db_dependency, db, auto_task
+    except Exception:
+        db.close()
+        app.dependency_overrides.pop(db_dependency, None)
+        raise
+
+
+def _assert_background_auto_task_rejects_before_cookie_query(
+    tmp_path,
+    monkeypatch,
+    *,
+    search_sub_type,
+    publish_sub_type,
+):
+    from backend.app.models import AiDraft, PublishJob
+    from backend.app.services import scheduler_service
+
+    db_dependency, db, auto_task = _create_background_auto_task_fixture(
+        tmp_path,
+        search_sub_type=search_sub_type,
+        publish_sub_type=publish_sub_type,
+    )
+    try:
+        def forbidden_scalars(*args, **kwargs):
+            raise AssertionError(
+                "Rejected account must stop before any Cookie-version query"
+            )
+
+        def forbidden_decrypt(_value):
+            raise AssertionError("Rejected account Cookie must not be decrypted")
+
+        monkeypatch.setattr(db, "scalars", forbidden_scalars)
+        monkeypatch.setattr(
+            scheduler_service,
+            "decrypt_text",
+            forbidden_decrypt,
+        )
+
+        scheduler_service._execute_auto_task_background(db, auto_task)
+
+        assert db.query(AiDraft).count() == 0
+        assert db.query(PublishJob).count() == 0
+        assert auto_task.total_published == 0
+    finally:
+        db.close()
+        app.dependency_overrides.pop(db_dependency, None)
+
+
+def test_background_auto_task_rejects_rednote_search_account_before_cookie_decryption(
+    tmp_path, monkeypatch
+):
+    _assert_background_auto_task_rejects_before_cookie_query(
+        tmp_path,
+        monkeypatch,
+        search_sub_type="rednote_pc",
+        publish_sub_type="creator",
+    )
+
+
+def test_background_auto_task_rejects_rednote_publish_account_before_side_effects(
+    tmp_path, monkeypatch
+):
+    _assert_background_auto_task_rejects_before_cookie_query(
+        tmp_path,
+        monkeypatch,
+        search_sub_type="pc",
+        publish_sub_type="rednote_pc",
+    )
+
+
+def test_background_auto_task_rejects_invalid_account_boundary_before_cookie_query(
+    tmp_path,
+    monkeypatch,
+):
+    from backend.app.adapters.xhs import creator_api_adapter, pc_api_adapter
+    from backend.app.models import AiDraft, PlatformAccount, PublishJob
+    from backend.app.services import scheduler_service
+
+    cases = [
+        ("search-owner", "search", "user_id", 9999),
+        ("search-platform", "search", "platform", "other"),
+        ("search-subtype", "search", "sub_type", "creator"),
+        ("search-status", "search", "status", "risk"),
+        ("publish-owner", "publish", "user_id", 9999),
+        ("publish-platform", "publish", "platform", "other"),
+        ("publish-subtype", "publish", "sub_type", "pc"),
+        ("publish-status", "publish", "status", "risk"),
+    ]
+
+    class ForbiddenAdapter:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError(
+                "Rejected account must stop before adapter construction"
+            )
+
+    for case_name, target_name, field, invalid_value in cases:
+        case_path = tmp_path / case_name
+        case_path.mkdir()
+        db_dependency, db, auto_task = _create_background_auto_task_fixture(
+            case_path,
+            search_sub_type="pc",
+            publish_sub_type="creator",
+        )
+        try:
+            target_id = (
+                auto_task.pc_account_id
+                if target_name == "search"
+                else auto_task.creator_account_id
+            )
+            target = db.get(PlatformAccount, target_id)
+            setattr(target, field, invalid_value)
+
+            def forbidden_scalars(*args, **kwargs):
+                raise AssertionError(
+                    "Rejected account must stop before any Cookie-version query"
+                )
+
+            def forbidden_decrypt(_value):
+                raise AssertionError(
+                    "Rejected account Cookie must not be decrypted"
+                )
+
+            with monkeypatch.context() as case_patch:
+                case_patch.setattr(db, "scalars", forbidden_scalars)
+                case_patch.setattr(
+                    scheduler_service,
+                    "decrypt_text",
+                    forbidden_decrypt,
+                )
+                case_patch.setattr(
+                    pc_api_adapter,
+                    "XhsPcApiAdapter",
+                    ForbiddenAdapter,
+                )
+                case_patch.setattr(
+                    creator_api_adapter,
+                    "XhsCreatorApiAdapter",
+                    ForbiddenAdapter,
+                )
+
+                scheduler_service._execute_auto_task_background(db, auto_task)
+
+            assert db.query(AiDraft).count() == 0
+            assert db.query(PublishJob).count() == 0
+            assert auto_task.total_published == 0
+        finally:
+            db.close()
+            app.dependency_overrides.pop(db_dependency, None)
 
 
 def test_run_monitoring_refresh_for_all_users_refreshes_active_targets(tmp_path):
