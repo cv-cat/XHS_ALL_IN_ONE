@@ -260,6 +260,7 @@ export type SavedNoteFilters = {
   has_assets?: boolean;
   has_comments?: boolean;
   page_size?: number;
+  page?: number;
 };
 
 export async function fetchSavedNoteIds(platform = "xhs"): Promise<string[]> {
@@ -278,6 +279,7 @@ export async function fetchSavedNotes(platformOrFilters: string | SavedNoteFilte
           has_assets: platformOrFilters.has_assets,
           has_comments: platformOrFilters.has_comments,
           page_size: platformOrFilters.page_size,
+          page: platformOrFilters.page,
         };
   const response = await http.get<Paginated<SavedNote>>("/notes", { params });
   return response.data;

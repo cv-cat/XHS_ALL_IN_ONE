@@ -30,6 +30,7 @@ import {
   Image,
   Input,
   Modal,
+  Pagination,
   Popconfirm,
   Row,
   Segmented,
@@ -215,6 +216,8 @@ export function XhsLibraryPage() {
   const [hasAssetsFilter, setHasAssetsFilter] = useState(false);
   const [hasCommentsFilter, setHasCommentsFilter] = useState(false);
   const [viewMode, setViewMode] = useState<string>("card");
+  const [pageSize, setPageSize] = useState(20);
+  const [currentPage, setCurrentPage] = useState(1);
   const [selectedNoteIds, setSelectedNoteIds] = useState<number[]>([]);
   const [batchTagId, setBatchTagId] = useState<string>("");
   const [batchActionMessage, setBatchActionMessage] = useState<string | null>(null);
@@ -224,9 +227,9 @@ export function XhsLibraryPage() {
 
   const selectedNoteIdSet = new Set(selectedNoteIds);
 
-  async function loadNotes(overrideFilters?: { q?: string; tag_id?: number; has_assets?: boolean; has_comments?: boolean }) {
+  async function loadNotes(overrideFilters?: { q?: string; tag_id?: number; has_assets?: boolean; has_comments?: boolean; page_size?: number; page?: number }) {
     setIsLoading(true); setError(null);
-    const f = overrideFilters ?? { q: keywordFilter.trim() || undefined, tag_id: selectedTagFilter ? Number(selectedTagFilter) : undefined, has_assets: hasAssetsFilter || undefined, has_comments: hasCommentsFilter || undefined };
+    const f = overrideFilters ?? { q: keywordFilter.trim() || undefined, tag_id: selectedTagFilter ? Number(selectedTagFilter) : undefined, has_assets: hasAssetsFilter || undefined, has_comments: hasCommentsFilter || undefined, page_size: pageSize, page: currentPage };
     try {
       const r = await fetchSavedNotes({ platform: "xhs", ...f });
       setNotes(r.items); setTotal(r.total);
@@ -237,7 +240,7 @@ export function XhsLibraryPage() {
 
   useEffect(() => { void loadNotes(); void loadTags(); }, []);
 
-  function clearFilters() { setKeywordFilter(""); setSelectedTagFilter(""); setHasAssetsFilter(false); setHasCommentsFilter(false); void loadNotes({}); }
+  function clearFilters() { setKeywordFilter(""); setSelectedTagFilter(""); setHasAssetsFilter(false); setHasCommentsFilter(false); setCurrentPage(1); void loadNotes({ page_size: pageSize, page: 1 }); }
   function toggleNoteSelection(id: number) { setSelectedNoteIds((c) => c.includes(id) ? c.filter((i) => i !== id) : [...c, id]); }
   function toggleVisibleSelection() { if (!notes.length) return; const vis = notes.map((n) => n.id); const allSel = vis.every((id) => selectedNoteIdSet.has(id)); setSelectedNoteIds((c) => allSel ? c.filter((id) => !vis.includes(id)) : Array.from(new Set([...c, ...vis]))); }
   function clearSelection() { setSelectedNoteIds([]); setBatchActionMessage(null); }
@@ -394,6 +397,11 @@ export function XhsLibraryPage() {
           <Col><Checkbox checked={hasAssetsFilter} onChange={(e) => setHasAssetsFilter(e.target.checked)}>有素材</Checkbox></Col>
           <Col><Checkbox checked={hasCommentsFilter} onChange={(e) => setHasCommentsFilter(e.target.checked)}>有评论</Checkbox></Col>
           <Col><Segmented value={viewMode} onChange={(v) => setViewMode(v as string)} options={[{ label: "卡片", value: "card" }, { label: "表格", value: "table" }]} /></Col>
+          <Col><Select style={{ width: "100%" }} value={pageSize} onChange={(v) => { setPageSize(Number(v)); void loadNotes({ page_size: Number(v) }); }} options={[
+            { value: 20, label: "20 条/页" },
+            { value: 50, label: "50 条/页" },
+            { value: 100, label: "100 条/页" },
+          ]} /></Col>
           <Col><Button onClick={clearFilters}>重置</Button></Col>
           <Col><Button type="primary" onClick={() => void loadNotes()} loading={isLoading}>筛选</Button></Col>
         </Row>
@@ -423,55 +431,59 @@ export function XhsLibraryPage() {
         <Empty description="内容库还是空的"><Link to="/platforms/xhs/discovery"><Button type="primary" icon={<BookOutlined />}>去发现笔记</Button></Link></Empty>
       ) : viewMode === "table" ? (
         <Card size="small">
-          <Table<SavedNote> columns={tableColumns} dataSource={notes} rowKey="id" size="small" pagination={{ pageSize: 20 }}
+          <Table<SavedNote> columns={tableColumns} dataSource={notes} rowKey="id" size="small" pagination={{ pageSize, current: currentPage, total: total, showSizeChanger: true, pageSizeOptions: [20, 50, 100], onChange: (page, newPageSize) => { setCurrentPage(page); setPageSize(newPageSize); void loadNotes({ page, page_size: newPageSize }); } }}
             rowSelection={{ selectedRowKeys: selectedNoteIds, onChange: (keys) => setSelectedNoteIds(keys as number[]) }}
             onRow={(n) => ({ onClick: () => void openDetail(n), style: { cursor: "pointer" } })} />
+          <Pagination total={total} current={currentPage} pageSize={pageSize} showSizeChanger pageSizeOptions={[20, 50, 100]} onChange={(page, newPageSize) => { setCurrentPage(page); setPageSize(newPageSize); void loadNotes({ page, page_size: newPageSize }); }} style={{ marginTop: 16, justifyContent: "center" }} />
         </Card>
       ) : (
-        <Row gutter={[16, 16]}>
-          {notes.map((note) => {
-            const cover = getSavedNoteCoverUrl(note);
-            const kind = getRawNoteType(note);
-            return (
-              <Col xs={12} sm={8} md={6} lg={4} xl={4} key={note.id}>
-                <Card hoverable size="small" style={{ overflow: "hidden" }} onClick={() => void openDetail(note)}
-                  cover={
-                    <div style={{ position: "relative", background: "#262626" }}>
-                      <Checkbox checked={selectedNoteIdSet.has(note.id)} onClick={(e) => { e.stopPropagation(); toggleNoteSelection(note.id); }} style={{ position: "absolute", top: 8, left: 8, zIndex: 2 }} />
-                      {cover ? <img src={cover} alt={note.title} referrerPolicy="no-referrer" style={{ width: "100%", aspectRatio: "1/1", objectFit: "cover", display: "block" }} /> : <div style={{ width: "100%", aspectRatio: "1/1", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,.2)", fontSize: 28 }}><PictureOutlined /></div>}
-                      <Tag color={kind.includes("video") ? "purple" : "blue"} style={{ position: "absolute", top: 8, right: 8 }} icon={kind.includes("video") ? <PlayCircleOutlined /> : <PictureOutlined />}>{kind.includes("video") ? "视频" : "图文"}</Tag>
-                    </div>
-                  }>
-                  <Card.Meta title={<Text ellipsis style={{ fontSize: 13 }}>{note.title || "未命名"}</Text>} description={
-                    <>
-                      <div>
-                        <Text type="secondary" style={{ fontSize: 12 }}>{note.author_name}</Text>
-                        {getNotePublishTime(note) ? <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>{getNotePublishTime(note)}</Text> : <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>{formatSavedTime(note.created_at)}</Text>}
+        <div>
+          <Row gutter={[16, 16]}>
+            {notes.map((note) => {
+              const cover = getSavedNoteCoverUrl(note);
+              const kind = getRawNoteType(note);
+              return (
+                <Col xs={12} sm={8} md={6} lg={4} xl={4} key={note.id}>
+                  <Card hoverable size="small" style={{ overflow: "hidden" }} onClick={() => void openDetail(note)}
+                    cover={
+                      <div style={{ position: "relative", background: "#262626" }}>
+                        <Checkbox checked={selectedNoteIdSet.has(note.id)} onClick={(e) => { e.stopPropagation(); toggleNoteSelection(note.id); }} style={{ position: "absolute", top: 8, left: 8, zIndex: 2 }} />
+                        {cover ? <img src={cover} alt={note.title} referrerPolicy="no-referrer" style={{ width: "100%", aspectRatio: "1/1", objectFit: "cover", display: "block" }} /> : <div style={{ width: "100%", aspectRatio: "1/1", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,.2)", fontSize: 28 }}><PictureOutlined /></div>}
+                        <Tag color={kind.includes("video") ? "purple" : "blue"} style={{ position: "absolute", top: 8, right: 8 }} icon={kind.includes("video") ? <PlayCircleOutlined /> : <PictureOutlined />}>{kind.includes("video") ? "视频" : "图文"}</Tag>
                       </div>
-                      {(() => {
-                        const eng = getNoteEngagement(note);
-                        if (!eng.likes && !eng.collects && !eng.comments && !eng.shares) return null;
-                        return (
-                          <div style={{ marginTop: 4, display: "flex", gap: 8, fontSize: 11, color: "rgba(255,255,255,.45)" }}>
-                            {eng.likes > 0 && <span><HeartOutlined /> {eng.likes}</span>}
-                            {eng.collects > 0 && <span><StarOutlined /> {eng.collects}</span>}
-                            {eng.comments > 0 && <span><MessageOutlined /> {eng.comments}</span>}
-                            {eng.shares > 0 && <span><ShareAltOutlined /> {eng.shares}</span>}
-                          </div>
-                        );
-                      })()}
-                    </>
-                  } />
-                  {getDisplayTags(note).length ? (
-                    <div style={{ marginTop: 6 }}>
-                      {getDisplayTags(note).map((t) => <Tag key={t.key} color={t.color} style={{ fontSize: 11 }}>{t.name}</Tag>)}
-                    </div>
-                  ) : null}
-                </Card>
-              </Col>
-            );
-          })}
-        </Row>
+                    }>
+                    <Card.Meta title={<Text ellipsis style={{ fontSize: 13 }}>{note.title || "未命名"}</Text>} description={
+                      <>
+                        <div>
+                          <Text type="secondary" style={{ fontSize: 12 }}>{note.author_name}</Text>
+                          {getNotePublishTime(note) ? <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>{getNotePublishTime(note)}</Text> : <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>{formatSavedTime(note.created_at)}</Text>}
+                        </div>
+                        {(() => {
+                          const eng = getNoteEngagement(note);
+                          if (!eng.likes && !eng.collects && !eng.comments && !eng.shares) return null;
+                          return (
+                            <div style={{ marginTop: 4, display: "flex", gap: 8, fontSize: 11, color: "rgba(255,255,255,.45)" }}>
+                              {eng.likes > 0 && <span><HeartOutlined /> {eng.likes}</span>}
+                              {eng.collects > 0 && <span><StarOutlined /> {eng.collects}</span>}
+                              {eng.comments > 0 && <span><MessageOutlined /> {eng.comments}</span>}
+                              {eng.shares > 0 && <span><ShareAltOutlined /> {eng.shares}</span>}
+                            </div>
+                          );
+                        })()}
+                      </>
+                    } />
+                    {getDisplayTags(note).length ? (
+                      <div style={{ marginTop: 6 }}>
+                        {getDisplayTags(note).map((t) => <Tag key={t.key} color={t.color} style={{ fontSize: 11 }}>{t.name}</Tag>)}
+                      </div>
+                    ) : null}
+                  </Card>
+                </Col>
+              );
+            })}
+          </Row>
+          <Pagination total={total} pageSize={pageSize} current={currentPage} showSizeChanger pageSizeOptions={[20, 50, 100]} onChange={(page, newPageSize) => { setCurrentPage(page); setPageSize(newPageSize); void loadNotes({ page, page_size: newPageSize }); }} style={{ marginTop: 16, justifyContent: "center" }} />
+        </div>
       )}
 
       <Drawer title={selectedNote?.title || "笔记详情"} open={isDetailOpen} onClose={closeDetail} width={640} styles={{ body: { background: "#1a1a1a" } }}>
