@@ -472,11 +472,6 @@ export function XhsLibraryPage() {
                         })()}
                       </>
                     } />
-                    {getDisplayTags(note).length ? (
-                      <div style={{ marginTop: 6 }}>
-                        {getDisplayTags(note).map((t) => <Tag key={t.key} color={t.color} style={{ fontSize: 11 }}>{t.name}</Tag>)}
-                      </div>
-                    ) : null}
                   </Card>
                 </Col>
               );
