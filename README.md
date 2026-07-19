@@ -259,6 +259,7 @@ scheduler:
 
 ## 📈 Star History
 
+
 <a href="https://www.star-history.com/#cv-cat/XHS_ALL_IN_ONE&Date">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=cv-cat/XHS_ALL_IN_ONE&type=Date&theme=dark" />
