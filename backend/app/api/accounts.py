@@ -11,6 +11,12 @@ from sqlalchemy.orm import Session
 from backend.app.adapters.xhs.creator_login_adapter import XhsCreatorLoginAdapter
 from backend.app.adapters.xhs.pc_api_adapter import XhsPcApiAdapter
 from backend.app.adapters.xhs.pc_login_adapter import XhsPcLoginAdapter
+from backend.app.adapters.xhs.rednote_account_adapter import (
+    RednoteAccountError,
+    RednotePcAccountAdapter,
+    RednoteRequestUnavailableError,
+    RednoteVerificationRequiredError,
+)
 from backend.app.core.database import get_db
 from backend.app.core.deps import get_current_user
 from backend.app.core.security import decrypt_text
@@ -32,9 +38,11 @@ router = APIRouter(prefix="/accounts", tags=["accounts"])
 
 class CookieImportRequest(BaseModel):
     platform: str = Field(pattern="^xhs$")
-    sub_type: str = Field(pattern="^(pc|creator)$")
+    sub_type: str = Field(pattern="^(pc|creator|rednote_pc)$")
     cookie_string: str = Field(min_length=3)
     sync_creator: bool = False
+    expected_external_user_id: Optional[str] = None
+    expected_nickname: Optional[str] = None
 
 
 def get_pc_account_adapter() -> XhsPcLoginAdapter:
@@ -43,6 +51,10 @@ def get_pc_account_adapter() -> XhsPcLoginAdapter:
 
 def get_creator_account_adapter() -> XhsCreatorLoginAdapter:
     return XhsCreatorLoginAdapter()
+
+
+def get_rednote_account_adapter() -> RednotePcAccountAdapter:
+    return RednotePcAccountAdapter()
 
 
 class XhsSelfProfileAdapter:
@@ -54,8 +66,21 @@ def get_xhs_self_profile_adapter() -> XhsSelfProfileAdapter:
     return XhsSelfProfileAdapter()
 
 
-def _select_adapter(sub_type: str, pc_adapter: XhsPcLoginAdapter, creator_adapter: XhsCreatorLoginAdapter):
-    return creator_adapter if sub_type == "creator" else pc_adapter
+def _select_adapter(
+    sub_type: str,
+    pc_adapter: XhsPcLoginAdapter,
+    creator_adapter: XhsCreatorLoginAdapter,
+    rednote_adapter: RednotePcAccountAdapter,
+):
+    adapters = {
+        "pc": pc_adapter,
+        "creator": creator_adapter,
+        "rednote_pc": rednote_adapter,
+    }
+    try:
+        return adapters[sub_type]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported account subtype: {sub_type}") from exc
 
 
 def _sync_creator_account_from_pc_cookie(
@@ -109,13 +134,51 @@ def import_cookie(
     db: Session = Depends(get_db),
     pc_adapter: XhsPcLoginAdapter = Depends(get_pc_account_adapter),
     creator_adapter: XhsCreatorLoginAdapter = Depends(get_creator_account_adapter),
+    rednote_adapter: RednotePcAccountAdapter = Depends(get_rednote_account_adapter),
     self_profile_adapter: XhsSelfProfileAdapter = Depends(get_xhs_self_profile_adapter),
 ):
-    adapter = _select_adapter(payload.sub_type, pc_adapter, creator_adapter)
+    if payload.sub_type == "rednote_pc" and payload.sync_creator:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Rednote does not support Creator sync")
+    if payload.sub_type == "rednote_pc" and not payload.expected_external_user_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expected Rednote user id is required")
+    adapter = _select_adapter(payload.sub_type, pc_adapter, creator_adapter, rednote_adapter)
     try:
         user_info = adapter.get_user_info(trans_cookies(payload.cookie_string))
+    except RednoteVerificationRequiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Rednote requires interactive verification",
+        ) from exc
+    except RednoteRequestUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Rednote account validation is temporarily unavailable",
+        ) from exc
+    except RednoteAccountError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Rednote session is invalid or expired",
+        ) from exc
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cookie is invalid or expired") from exc
+        if payload.sub_type == "rednote_pc":
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Rednote account validation is temporarily unavailable",
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cookie is invalid or expired",
+        ) from exc
+
+    if payload.sub_type == "rednote_pc":
+        external_user_id = str(user_info.get("external_user_id") or "")
+        nickname = str(user_info.get("nickname") or "")
+        if not external_user_id or not nickname:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cookie identity is incomplete")
+        if external_user_id != payload.expected_external_user_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cookie identity does not match expected account")
+        if payload.expected_nickname and nickname != payload.expected_nickname:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cookie nickname does not match expected account")
 
     if payload.sub_type == "pc":
         try:
@@ -152,6 +215,7 @@ def check_account(
     db: Session = Depends(get_db),
     pc_adapter: XhsPcLoginAdapter = Depends(get_pc_account_adapter),
     creator_adapter: XhsCreatorLoginAdapter = Depends(get_creator_account_adapter),
+    rednote_adapter: RednotePcAccountAdapter = Depends(get_rednote_account_adapter),
     self_profile_adapter: XhsSelfProfileAdapter = Depends(get_xhs_self_profile_adapter),
 ):
     account = db.get(PlatformAccount, account_id)
@@ -170,15 +234,35 @@ def check_account(
         db.refresh(account)
         return serialize_account(account)
 
-    adapter = _select_adapter(account.sub_type or "pc", pc_adapter, creator_adapter)
+    try:
+        adapter = _select_adapter(account.sub_type or "pc", pc_adapter, creator_adapter, rednote_adapter)
+    except ValueError as exc:
+        account.status = "expired"
+        account.status_message = str(exc)
+        account.updated_at = shanghai_now()
+        db.commit()
+        db.refresh(account)
+        return serialize_account(account)
     try:
         cookies_text = decrypt_text(cookie_version.encrypted_cookies)
         user_info = adapter.get_user_info(decode_cookie_text(cookies_text))
-        try:
-            self_profile = self_profile_adapter.get_self_profile(cookie_header_from_text(cookies_text))
-            user_info = enrich_user_info_with_xhs_self_profile(user_info, self_profile)
-        except Exception:
-            pass
+        refreshed_external_user_id = str(user_info.get("external_user_id") or "")
+        if account.sub_type == "rednote_pc":
+            if not account.external_user_id or not refreshed_external_user_id or (
+                refreshed_external_user_id != account.external_user_id
+            ):
+                account.status = "risk"
+                account.status_message = "Authenticated identity changed; account was not rebound"
+                account.updated_at = shanghai_now()
+                db.commit()
+                db.refresh(account)
+                return serialize_account(account)
+        if account.sub_type != "rednote_pc":
+            try:
+                self_profile = self_profile_adapter.get_self_profile(cookie_header_from_text(cookies_text))
+                user_info = enrich_user_info_with_xhs_self_profile(user_info, self_profile)
+            except Exception:
+                pass
         account.status = "active"
         account.status_message = ""
         account.nickname = user_info.get("nickname", account.nickname)
@@ -199,9 +283,25 @@ def check_account(
             except Exception as upload_exc:
                 account.status = "expired"
                 account.status_message = f"上传凭证验证异常: {upload_exc}"
-    except Exception as exc:
+    except RednoteVerificationRequiredError:
+        account.status = "risk"
+        account.status_message = "Rednote requires interactive verification"
+        account.updated_at = shanghai_now()
+    except RednoteRequestUnavailableError:
+        account.status = "unknown"
+        account.status_message = "Rednote health check is temporarily unavailable"
+        account.updated_at = shanghai_now()
+    except RednoteAccountError:
         account.status = "expired"
-        account.status_message = str(exc)
+        account.status_message = "Rednote session is invalid or expired"
+        account.updated_at = shanghai_now()
+    except Exception as exc:
+        if account.sub_type == "rednote_pc":
+            account.status = "unknown"
+            account.status_message = "Rednote health check is temporarily unavailable"
+        else:
+            account.status = "expired"
+            account.status_message = str(exc)
         account.updated_at = shanghai_now()
 
     db.commit()

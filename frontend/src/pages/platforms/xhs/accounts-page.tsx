@@ -46,6 +46,7 @@ const statusColorMap: Record<string, string> = {
   active: "green",
   healthy: "green",
   expired: "red",
+  risk: "orange",
   unknown: "default",
 };
 
@@ -53,6 +54,7 @@ const statusLabelMap: Record<string, string> = {
   active: "正常",
   healthy: "正常",
   expired: "过期",
+  risk: "身份异常",
   unknown: "未知",
 };
 
@@ -141,7 +143,7 @@ export function XhsAccountsPage() {
               账号矩阵
             </Title>
             <Text style={{ color: "rgba(255,255,255,0.45)", marginTop: 4, display: "block" }}>
-              管理 PC 与 Creator 账号、Cookie 状态、健康检查和账号作用域。
+              管理 XHS PC、Creator 与 Rednote PC 账号的 Cookie 状态和健康检查。
             </Text>
           </div>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setDrawerOpen(true)}>
@@ -193,6 +195,7 @@ export function XhsAccountsPage() {
             {accounts.map((account) => {
               const isChecking = checkingAccountIds.has(account.id);
               const isCreator = account.sub_type === "creator";
+              const isRednote = account.sub_type === "rednote_pc";
               const statusColor = statusColorMap[account.status] || "default";
 
               return (
@@ -262,7 +265,7 @@ export function XhsAccountsPage() {
                         <Col span={6}>
                           <Statistic
                             title={<span style={{ color: "rgba(255,255,255,0.45)", fontSize: 12 }}>类型</span>}
-                            value="PC"
+                            value={isRednote ? "Rednote PC" : "PC"}
                             valueStyle={{ color: "rgba(255,255,255,0.88)", fontSize: 14 }}
                           />
                         </Col>

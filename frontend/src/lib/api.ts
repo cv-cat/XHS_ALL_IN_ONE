@@ -74,6 +74,8 @@ import type {
   XhsDataCrawlResponse,
   XhsSearchOptions,
   XhsSearchNote,
+  XhsUserNotesCrawlPayload,
+  XhsUserNotesCrawlResponse,
   XhsQrLoginSession
 } from "../types";
 
@@ -391,12 +393,21 @@ export async function searchXhsNotes(payload: XhsSearchOptions): Promise<XhsNote
   return response.data;
 }
 
+export type XhsDataCrawlStreamResult = {
+  status: "completed" | "failed";
+  total: number;
+  success_count: number;
+  saved_count: number;
+  failed_count: number;
+  terminal_error: string | null;
+};
+
 export async function crawlXhsDataStream(
   payload: XhsDataCrawlPayload,
   onItem: (index: number, item: XhsDataCrawlItem) => void,
   onProgress?: (message: string) => void,
   onError?: (message: string) => void,
-): Promise<{ total: number; success_count: number; failed_count: number }> {
+): Promise<XhsDataCrawlStreamResult> {
   const token = getAccessToken();
   const response = await fetch("/api/xhs/crawl/data", {
     method: "POST",
@@ -411,7 +422,16 @@ export async function crawlXhsDataStream(
   if (!reader) throw new Error("No response stream");
   const decoder = new TextDecoder();
   let buffer = "";
-  let result = { total: 0, success_count: 0, failed_count: 0 };
+  let terminalError: string | null = null;
+  let sawDone = false;
+  let result: XhsDataCrawlStreamResult = {
+    status: "failed",
+    total: 0,
+    success_count: 0,
+    saved_count: 0,
+    failed_count: 0,
+    terminal_error: null as string | null,
+  };
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -424,12 +444,45 @@ export async function crawlXhsDataStream(
         const event = JSON.parse(line.slice(6));
         if (event.type === "item") onItem(event.index, event.item);
         else if (event.type === "progress") onProgress?.(event.message);
-        else if (event.type === "error") onError?.(event.message);
-        else if (event.type === "done") result = { total: event.total, success_count: event.success_count, failed_count: event.failed_count };
+        else if (event.type === "error") {
+          const message = event.message || "Collection stopped";
+          terminalError = message;
+          onError?.(message);
+        } else if (event.type === "done") {
+          sawDone = true;
+          const failed = event.status === "failed" || Boolean(terminalError);
+          result = {
+            status: failed ? "failed" : "completed",
+            total: event.total,
+            success_count: event.success_count,
+            saved_count: event.saved_count ?? 0,
+            failed_count: event.failed_count,
+            terminal_error: event.terminal_error
+              || event.error
+              || terminalError
+              || (failed ? "Collection stopped" : null),
+          };
+        }
       } catch { /* skip malformed events */ }
     }
   }
+  if (!sawDone && !terminalError) {
+    terminalError = "Collection stream ended before completion";
+    onError?.(terminalError);
+  }
+  result.terminal_error = result.terminal_error || terminalError;
+  if (result.terminal_error) result.status = "failed";
   return result;
+}
+
+export async function crawlXhsUserNotes(
+  payload: XhsUserNotesCrawlPayload,
+): Promise<XhsUserNotesCrawlResponse> {
+  const response = await http.post<XhsUserNotesCrawlResponse>(
+    "/xhs/crawl/user-notes",
+    payload,
+  );
+  return response.data;
 }
 
 export async function fetchXhsNoteDetail(payload: { account_id: number; url: string }): Promise<XhsSearchNote> {
@@ -767,9 +820,11 @@ export async function uploadPublishAsset(assetId: number): Promise<PublishAsset>
 }
 
 export async function importXhsCookieAccount(payload: {
-  sub_type: "pc" | "creator";
+  sub_type: "pc" | "creator" | "rednote_pc";
   cookie_string: string;
   sync_creator?: boolean;
+  expected_external_user_id?: string;
+  expected_nickname?: string;
 }): Promise<PlatformAccount> {
   const response = await http.post<PlatformAccount>("/accounts/import-cookie", {
     platform: "xhs",
