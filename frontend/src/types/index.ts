@@ -367,6 +367,29 @@ export type GenerateNotePayload = {
   topic: string;
   reference?: string;
   instruction?: string;
+  system_prompt?: string;
+};
+
+export type PromptTemplate = {
+  id: number | string;
+  is_builtin: boolean;
+  name: string;
+  category: string;
+  description: string;
+  topic_hint: string;
+  reference_hint: string;
+  instruction: string;
+  system_prompt: string;
+};
+
+export type PromptTemplatePayload = {
+  name: string;
+  category?: string;
+  description?: string;
+  topic_hint?: string;
+  reference_hint?: string;
+  instruction?: string;
+  system_prompt?: string;
 };
 
 export type GenerateTitlePayload = {

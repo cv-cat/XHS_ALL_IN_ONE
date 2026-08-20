@@ -28,6 +28,7 @@ class TextAiClient(Protocol):
         topic: str,
         reference: str,
         instruction: str,
+        system_prompt: str = "",
     ) -> dict[str, str]:
         ...
 
@@ -191,11 +192,12 @@ class OpenAICompatibleTextClient:
         topic: str,
         reference: str,
         instruction: str,
+        system_prompt: str = "",
     ) -> dict[str, str]:
         content = self._complete(
             model_config=model_config,
             api_key=api_key,
-            system_prompt="你是小红书内容策划，输出可发布的标题和正文。",
+            system_prompt=system_prompt.strip() or "你是小红书内容策划，输出可发布的标题和正文。",
             user_prompt=(
                 "请生成一篇小红书笔记，格式必须是：\n标题：...\n正文：...\n\n"
                 f"选题：{topic}\n参考材料：{reference or '无'}\n要求：{instruction or '自然、有信息密度'}"

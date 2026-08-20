@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.app.api import accounts, ai, auth, auto_tasks, drafts, files, keyword_groups, login_sessions, model_configs, notes, notifications, publish, tags, tasks
+from backend.app.api import accounts, ai, auth, auto_tasks, drafts, files, keyword_groups, login_sessions, model_configs, notes, notifications, prompt_templates, publish, tags, tasks
 from backend.app.api.platforms import registry
 from backend.app.api.platforms.xhs import analytics, crawl, creator, monitoring, pc
 from backend.app.core.config import get_settings
@@ -58,6 +58,7 @@ def create_app() -> FastAPI:
     app.include_router(model_configs.router, prefix="/api")
     app.include_router(tags.router, prefix="/api")
     app.include_router(notifications.router, prefix="/api")
+    app.include_router(prompt_templates.router, prefix="/api")
     app.include_router(keyword_groups.router, prefix="/api")
     app.include_router(publish.router, prefix="/api")
     app.include_router(analytics.router, prefix="/api")

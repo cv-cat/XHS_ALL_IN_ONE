@@ -52,6 +52,8 @@ import type {
   PlatformAccount,
   PlatformMeta,
   PlatformUser,
+  PromptTemplate,
+  PromptTemplatePayload,
   PublishAsset,
   PublishAssetPayload,
   PublishJob,
@@ -523,6 +525,27 @@ export async function rewriteDraftWithAi(payload: RewriteDraftPayload): Promise<
 export async function generateNoteWithAi(payload: GenerateNotePayload): Promise<Draft> {
   const response = await http.post<Draft>("/ai/generate-note", payload);
   return response.data;
+}
+
+export async function fetchPromptTemplates(category?: string): Promise<Paginated<PromptTemplate>> {
+  const response = await http.get<Paginated<PromptTemplate>>("/prompt-templates", {
+    params: category ? { category } : undefined,
+  });
+  return response.data;
+}
+
+export async function createPromptTemplate(payload: PromptTemplatePayload): Promise<PromptTemplate> {
+  const response = await http.post<PromptTemplate>("/prompt-templates", payload);
+  return response.data;
+}
+
+export async function updatePromptTemplate(id: number, payload: Partial<PromptTemplatePayload>): Promise<PromptTemplate> {
+  const response = await http.patch<PromptTemplate>(`/prompt-templates/${id}`, payload);
+  return response.data;
+}
+
+export async function deletePromptTemplate(id: number): Promise<void> {
+  await http.delete(`/prompt-templates/${id}`);
 }
 
 export async function generateTitleOptions(payload: GenerateTitlePayload): Promise<{ items: string[] }> {
