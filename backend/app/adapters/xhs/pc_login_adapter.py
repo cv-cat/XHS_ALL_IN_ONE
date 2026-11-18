@@ -22,6 +22,27 @@ class XhsPcLoginAdapter:
             "qr_url": payload["qr_url"],
         }
 
+    def prepare_qrcode(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Mirror the CLI flow: pre-check, then register the anonymous profile.
+
+        Without `ensure_webprofile` the QR session has no `gid`, so the phone can
+        show "logged in" while the web session never receives the confirmation.
+        """
+        with direct_xhs_request_env():
+            from apis.xhs_pc_login_apis import XHSLoginApi
+
+            api = XHSLoginApi()
+            cookies = payload["cookies"]
+            success, message, cookies = api.check_qrcode_status(
+                payload["qr_id"], payload["code"], cookies
+            )
+            if success:
+                raise RuntimeError("二维码在展示前已被确认，请重新生成")
+            if "扫描" not in (message or ""):
+                raise RuntimeError(f"二维码预检查状态异常：{message}")
+            api.ensure_webprofile(cookies)
+        return cookies
+
     def check_qrcode_status(self, qr_id: str, code: str, cookies: dict[str, Any]) -> dict[str, Any]:
         with direct_xhs_request_env():
             from apis.xhs_pc_login_apis import XHSLoginApi

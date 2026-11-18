@@ -53,34 +53,62 @@ export function QrLoginPanel({ accountType, onConfirmed }: QrLoginPanelProps) {
     void startSession();
   }, [accountType, syncCreator]);
 
+  const onConfirmedRef = useRef(onConfirmed);
   useEffect(() => {
-    if (!session?.session_id || session.status === "confirmed" || session.status === "expired") {
+    onConfirmedRef.current = onConfirmed;
+  }, [onConfirmed]);
+
+  useEffect(() => {
+    const sessionId = session?.session_id;
+    if (!sessionId || session?.status === "confirmed" || session?.status === "expired") {
       return;
     }
 
-    const interval = window.setInterval(async () => {
+    let cancelled = false;
+    let inFlight = false;
+
+    const poll = async () => {
+      if (inFlight || cancelled) return;
+      inFlight = true;
       try {
-        const polled = await pollXhsLoginSession(session.session_id);
+        const polled = await pollXhsLoginSession(sessionId);
+        if (cancelled) return;
         setSession((current) => ({
           ...polled,
           qr_image_data_url: polled.qr_image_data_url ?? current?.qr_image_data_url
         }));
+        setError(null);
         if (polled.status === "scanned") {
-          setStatusText("已扫码，请在手机端确认登录");
+          setStatusText("已扫码，请在手机端点「确认登录」");
         } else if (polled.status === "expired") {
           setStatusText("二维码已过期，请刷新");
-        } else if (polled.status === "confirmed" && polled.account && !confirmedRef.current) {
-          confirmedRef.current = true;
-          setStatusText("账号绑定成功");
-          onConfirmed(polled.account);
+        } else if (polled.status === "confirmed") {
+          if (polled.account && !confirmedRef.current) {
+            confirmedRef.current = true;
+            setStatusText("账号绑定成功");
+            onConfirmedRef.current(polled.account);
+          } else if (!polled.account) {
+            setStatusText(polled.error || "已确认登录，但账号信息读取失败，请重试或改用 Cookie 导入");
+            setError(polled.error || "账号信息读取失败，可改用 Cookie 导入");
+          }
         }
       } catch {
-        setError("轮询登录状态失败，正在等待下一次尝试。");
+        if (!cancelled) {
+          setError("轮询登录状态失败，正在等待下一次尝试。");
+        }
+      } finally {
+        inFlight = false;
       }
-    }, 2000);
+    };
 
-    return () => window.clearInterval(interval);
-  }, [accountType, onConfirmed, session?.session_id, session?.status]);
+    void poll();
+    const interval = window.setInterval(poll, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [session?.session_id, session?.status]);
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
