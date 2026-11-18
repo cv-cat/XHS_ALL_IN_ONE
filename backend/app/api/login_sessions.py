@@ -147,6 +147,7 @@ def pc_qrcode(
     payload = payload or PcQrCodeRequest()
     try:
         qr_payload = adapter.create_qrcode()
+        cookies = adapter.prepare_qrcode(qr_payload)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -161,7 +162,7 @@ def pc_qrcode(
         code=qr_payload["code"],
         qr_url=qr_payload["qr_url"],
         encrypted_temp_cookies=encrypt_text(
-            _dump_temp_state(qr_payload["cookies"], sync_creator=payload.sync_creator)
+            _dump_temp_state(cookies, sync_creator=payload.sync_creator)
         ),
     )
     db.add(session)
@@ -225,16 +226,26 @@ def login_session(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported login session")
 
     cookies, sync_creator = _load_temp_state(decrypt_text(session.encrypted_temp_cookies))
+    user_info = None
+    account_error = None
     if session.sub_type == "pc":
         if not session.code:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported login session")
         result = pc_adapter.check_qrcode_status(session.qr_id, session.code, cookies)
         account_sub_type = "pc"
-        user_info = pc_adapter.get_user_info(result["cookies"]) if result["status"] == "confirmed" else None
+        if result["status"] == "confirmed":
+            try:
+                user_info = pc_adapter.get_user_info(result["cookies"])
+            except Exception as exc:
+                account_error = f"已确认登录，但读取账号信息失败：{exc}"
     else:
         result = creator_adapter.check_qrcode_status(session.qr_id, cookies)
         account_sub_type = "creator"
-        user_info = creator_adapter.get_user_info(result["cookies"]) if result["status"] == "confirmed" else None
+        if result["status"] == "confirmed":
+            try:
+                user_info = creator_adapter.get_user_info(result["cookies"])
+            except Exception as exc:
+                account_error = f"已确认登录，但读取账号信息失败：{exc}"
     session.status = result["status"]
     session.encrypted_temp_cookies = encrypt_text(
         _dump_temp_state(result["cookies"], sync_creator=sync_creator)
@@ -242,16 +253,19 @@ def login_session(
 
     account_payload = None
     creator_account_payload = None
-    if session.status == "confirmed":
-        account, action = _create_account_from_login(
-            db=db,
-            user_id=current_user.id,
-            sub_type=account_sub_type,
-            user_info=user_info,
-            cookies=result["cookies"],
-        )
-        account_payload = serialize_account(account, action)
-        if account_sub_type == "pc" and sync_creator:
+    if session.status == "confirmed" and user_info is not None:
+        try:
+            account, action = _create_account_from_login(
+                db=db,
+                user_id=current_user.id,
+                sub_type=account_sub_type,
+                user_info=user_info,
+                cookies=result["cookies"],
+            )
+            account_payload = serialize_account(account, action)
+        except Exception as exc:
+            account_error = f"登录成功，但写入账号失败：{exc}"
+        if account_payload and account_sub_type == "pc" and sync_creator:
             creator_account_payload = _sync_creator_account_from_pc_login(
                 db=db,
                 user_id=current_user.id,
@@ -266,6 +280,7 @@ def login_session(
         "qr_url": session.qr_url,
         "account": account_payload,
         "creator_account": creator_account_payload,
+        "error": account_error,
     }
 
 

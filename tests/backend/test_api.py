@@ -434,6 +434,10 @@ class FakePcLoginAdapter:
             "qr_url": "https://example.test/qr",
         }
 
+    def prepare_qrcode(self, payload):
+        # Real adapter pre-checks and registers an anonymous profile here.
+        return payload["cookies"]
+
     def check_qrcode_status(self, qr_id, code, cookies):
         assert qr_id == "qr-123"
         assert code == "code-123"
